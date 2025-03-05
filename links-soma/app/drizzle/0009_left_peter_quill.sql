@@ -1,0 +1,1 @@
+ALTER TABLE `result_views` ADD `layoutIndex` integer;

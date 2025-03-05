@@ -1,0 +1,5 @@
+/* maplibre-gl/dist/maplibre-gl.cssを上書きする */
+.maplibregl-popup {
+  max-width: 336px !important;
+  min-width: 240px;
+}

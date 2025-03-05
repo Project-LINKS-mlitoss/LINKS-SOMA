@@ -1,0 +1,19 @@
+.see-all-content-left {
+  display: none;
+}
+
+.see-all-content-left:has(+ .see-all-ellipses + .see-all-content-button:focus) {
+  display: inline;
+}
+
+.see-all-ellipses:has(+ .see-all-content-button:focus) {
+  display: none;
+}
+
+/** diplay: noneにするとボタン操作が効かなくなる */
+.see-all-content-button:focus {
+  height: 0;
+  line-height: 0;
+  padding: 0;
+  margin: 0;
+}

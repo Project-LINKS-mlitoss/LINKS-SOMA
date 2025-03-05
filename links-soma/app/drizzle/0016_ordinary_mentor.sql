@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `process_id` integer NOT NULL;

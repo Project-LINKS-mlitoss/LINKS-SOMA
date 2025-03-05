@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+	@apply text-base;
+}
+
+body::-webkit-scrollbar {
+	width: 9px;
+	height: 9px;
+}
+
+body::-webkit-scrollbar-track {
+	background-color: #d9d9d9;
+}
+
+body::-webkit-scrollbar-thumb {
+	background-color: rgb(0 190 190);
+}
+
+.btn-color-purple.active,
+.btn-color-purple.custom {
+	background-color: #5B5D9B !important;
+	color: #fff !important
+}

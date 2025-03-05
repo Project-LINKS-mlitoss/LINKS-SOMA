@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    // 基本
+    "target": "ESNext",
+    "module": "ESNext",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+
+    // モジュール解決
+    "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+
+    // 型チェック
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "noImplicitThis": true,
+    "alwaysStrict": true,
+    "noUnusedLocals": false, // ESLint側で検証するためこちら側ではfalseに設定
+    "noUnusedParameters": false, // ESLint側で検証するためこちら側ではfalseに設定
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "useDefineForClassFields": true,
+
+    // 出力
+    "outDir": "dist",
+    "sourceMap": true,
+    "noEmit": false,
+
+    // その他
+    "allowJs": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // CSS Modulesファイルのインポートエラーを回避する
+    "types": ["vite/client", "vitest/importMeta"],
+
+    "composite": true
+  },
+  "exclude": ["node_modules", "dist", "forge.config.ts"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "package.json",
+    "assets/protomaps-basemaps.json"
+  ]
+}

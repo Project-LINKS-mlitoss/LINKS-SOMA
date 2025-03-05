@@ -1,0 +1,1 @@
+ALTER TABLE `job_tasks` ADD `error_msg` text;

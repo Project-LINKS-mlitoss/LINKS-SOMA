@@ -1,0 +1,1 @@
+ALTER TABLE `jobs` ADD `is_named` integer NOT NULL;

@@ -1,0 +1,96 @@
+name: Build Electron Apps
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        region:
+          [hokkaido, tohoku, kanto, chubu, kansai, chugoku, shikoku, kyushu]
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "**/package-lock.json"
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Poetry
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry==1.8.3
+          pip install pyinstaller
+
+      - name: Install dependencies
+        env:
+          HUSKY: "0"
+        run: |
+          npm ci
+          cd ml && poetry install --no-root
+
+      - name: Google Auth
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "my-project"
+          workload_identity_provider: "projects/319874134116/locations/global/workloadIdentityPools/github/providers/links-akiya"
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download pmtiles
+        shell: pwsh
+        run: |
+          gcloud storage cp gs://mymapapp_bucket/basemaps/${{ matrix.region }}/basemap.pmtiles app/public/
+          echo "Download completed for ${{ matrix.region }}"
+
+      - name: Setup home directory for PyInstaller
+        shell: cmd
+        run: |
+          mkdir "C:\Users\temp"
+          echo HOME=C:\Users\temp>> %GITHUB_ENV%
+          echo USERPROFILE=C:\Users\temp>> %GITHUB_ENV%
+
+      - name: Build ML
+        working-directory: ./ml
+        run: npm run build
+
+      - name: Build App
+        working-directory: ./app
+        run: npm run make
+
+      - name: Create and Upload ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "temp_zip" | Out-Null
+          gcloud storage cp gs://mymapapp_bucket/dummy.zip temp_zip/
+
+          $buildZip = Get-ChildItem -Path "app/out/make/zip" -Recurse -Filter "*.zip" | Select-Object -First 1
+          Copy-Item -Path $buildZip.FullName -Destination "temp_zip/app.zip"
+
+          $version = (Get-Content "app/package.json" | ConvertFrom-Json).version
+          $finalZipName = "LINKS_SOMA_v${version}_${{ matrix.region }}.zip"
+
+          Compress-Archive -Path "temp_zip/*" -DestinationPath $finalZipName
+          gcloud storage cp $finalZipName gs://links-akiya-builds/
+
+          Remove-Item -Path "temp_zip" -Recurse -Force
+          Remove-Item -Path $finalZipName -Force

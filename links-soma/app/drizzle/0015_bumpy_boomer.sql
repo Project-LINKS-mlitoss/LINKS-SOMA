@@ -1,0 +1,1 @@
+ALTER TABLE `raw_data_sets` DROP COLUMN `job_results_id`;

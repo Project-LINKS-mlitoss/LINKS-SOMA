@@ -1,0 +1,67 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/schema.json",
+  "build": {
+    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": "npm run dev",
+    "frontendDist": "../build",
+    "devUrl": "http://localhost:5173"
+  },
+  "bundle": {
+    "active": true,
+    "category": "DeveloperTool",
+    "copyright": "Copyright© 2025 MLIT Japan. All Rights Reserved.",
+    "targets": "all",
+    "externalBin": [],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "webviewInstallMode": {
+          "type": "embedBootstrapper"
+      }
+    },
+    "longDescription": "",
+    "macOS": {
+      "entitlements": null,
+      "exceptionDomain": "",
+      "frameworks": [],
+      "providerShortName": null,
+      "signingIdentity": null
+    },
+    "resources": [],
+    "shortDescription": "",
+    "linux": {
+      "deb": {
+        "depends": []
+      }
+    }
+  },
+  "productName": "LINKS SOMA CityGML Converter",
+  "mainBinaryName": "LINKS_SOMA_CityGML_Converter",
+  "version": "0.0.0",
+  "identifier": "jp.co.mierune.nusamai",
+  "plugins": {},
+  "app": {
+    "windows": [
+      {
+        "title": "LINKS SOMA CityGML Converter",
+        "fullscreen": false,
+        "resizable": true,
+        "height": 900,
+        "width": 640,
+        "minHeight": 600,
+        "minWidth": 500
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}

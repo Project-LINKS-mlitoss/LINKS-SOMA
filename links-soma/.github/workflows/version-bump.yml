@@ -1,0 +1,60 @@
+name: Version Bump and Build
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "app/package.json"
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Bump version
+        working-directory: ./app
+        run: |
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          # Split version into major.minor.patch
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          # Increment patch version
+          PATCH=$((VERSION_PARTS[2] + 1))
+          NEW_VERSION="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$PATCH"
+          # Update package.json
+          npm version $NEW_VERSION --no-git-tag-version
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add app/package.json
+          git commit -m "chore: bump version [skip ci]"
+          git push
+
+  trigger-build:
+    needs: version-bump
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger build workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.name,
+              workflow_id: 'build.yml',
+              ref: 'main'
+            })

@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "jsx": "react-jsx"
+  },
+  "references": [
+    { "path": "./tsconfig.base.json" },
+    { "path": "./tsconfig.forge.json" }
+  ]
+}

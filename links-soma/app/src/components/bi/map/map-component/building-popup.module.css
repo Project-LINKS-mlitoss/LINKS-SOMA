@@ -1,0 +1,130 @@
+/* makeStylesだとスタイルが崩れるため、CSS Modulesを使う */
+
+.container {
+  margin: -15px -10px;
+  background-color: white;
+  border-radius: 10px;
+}
+
+.header {
+  background-color: #1b8c631f;
+  padding: 20px 16px 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.circleIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.close {
+  position: absolute;
+  font-size: 24px;
+  top: 15px;
+  right: 15px;
+  cursor: pointer;
+  color: #8a8a8a;
+}
+
+.predictedProbability {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.address {
+  color: #666;
+  font-size: 12px;
+}
+
+.info {
+  padding: 12px 20px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.info > div {
+  width: calc(50% - 12px);
+}
+
+.heading {
+  color: #333;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  max-width: 100%;
+  font-size: 12px;
+  border-bottom: 1px solid #e0e0e0;
+  line-height: 2;
+}
+
+.itemLabel {
+  color: #8a8a8a;
+  flex-shrink: 0;
+}
+
+.itemValue {
+  color: #242424;
+  overflow-wrap: anywhere;
+}
+
+.square {
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.householdIcon {
+  background-color: #0c6c0e;
+}
+
+.waterIcon {
+  background-color: #3693ea;
+}
+
+.buildingIcon {
+  background-color: #df7324;
+}
+
+.otherIcon {
+  background-color: #738298;
+}
+
+.low {
+  color: #1b8c63;
+  background-color: #1b8c631f;
+}
+
+.low > span {
+  background-color: #1b8c63;
+}
+
+.medium {
+  color: #ffa929;
+  background-color: #ffa9291f;
+}
+
+.medium > span {
+  background-color: #ffa929;
+}
+
+.high {
+  color: #c4314b;
+  background-color: #c4314b1f;
+}
+
+.high > span {
+  background-color: #c4314b;
+}

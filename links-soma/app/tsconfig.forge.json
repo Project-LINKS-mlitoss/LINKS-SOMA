@@ -1,0 +1,9 @@
+// forge.config.ts用のtsconfigファイル
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "composite": true
+  },
+  "include": ["forge.config.ts"]
+}
