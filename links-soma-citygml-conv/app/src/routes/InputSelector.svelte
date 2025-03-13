@@ -47,7 +47,7 @@
 	}
 
 	function getTimestamp() {
-		const timestamp = new Date().toISOString().split('T')[0].replaceAll("-", "");
+		const timestamp = new Date().getFullYear();
 		return `linksoma${timestamp}`;
 	}
 

@@ -1,6 +1,6 @@
 import { Spinner } from "@fluentui/react-components";
 import { useState } from "react";
-import { Button } from "../ui/button";
+import { Button } from "../../components/ui/button";
 import { useFetchDataSetResults } from "../../hooks/use-fetch-data-set-results";
 
 export const DebugCreateDatasets = (): JSX.Element => {

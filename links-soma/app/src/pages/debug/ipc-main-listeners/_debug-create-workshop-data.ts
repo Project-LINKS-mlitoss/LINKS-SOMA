@@ -1,14 +1,14 @@
-import { getFilePathInDummyData } from "../utils/get-file-path-in-dummy-data";
-import { convertCsvToObject } from "../utils/convert-csv-to-object";
-import { db } from "../utils/db";
+import { getFilePathInDummyData } from "../../../utils/get-file-path-in-dummy-data";
+import { convertCsvToObject } from "../../../utils/convert-csv-to-object";
+import { db } from "../../../utils/db";
 import {
   data_set_detail_areas,
   data_set_detail_buildings,
   data_set_results,
   type InsertDataSetDetailArea,
   type InsertDataSetDetailBuilding,
-} from "../schema";
-import { type IpcMainListener } from ".";
+} from "../../../schema";
+import { type IpcMainListener } from "../../../ipc-main-listeners";
 
 export const _debugCreateWorkshopData = (async (
   _: unknown,

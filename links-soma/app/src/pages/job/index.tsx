@@ -12,7 +12,6 @@ import { BreadcrumbBase, BreadcrumbItem } from "../../components/ui/breadcrumb";
 import { ROUTES } from "../../routes";
 import { Pagination } from "../../components/ui/pagination";
 import { usePagination } from "../../hooks/use-pagination";
-import { DebugCreateButtons } from "./_debug-create-buttuns";
 
 const useStyles = makeStyles({
   root: {
@@ -104,8 +103,6 @@ export function Job(): JSX.Element {
           <div className={styles.noData}>現在表示できる処理はありません</div>
         )}
       </Card>
-
-      <DebugCreateButtons />
     </div>
   );
 }

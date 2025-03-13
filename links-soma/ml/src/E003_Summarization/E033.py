@@ -64,8 +64,12 @@ def rename_columns(gdf, ext, job_id=None, target_unit="building"):
 
     if ext != "csv":
         rename_dict = {col: columns[col] for col in gdf.columns if col in columns and col != "geometry"}
+        selected_columns = list(rename_dict.keys()) + (["geometry"] if "geometry" in gdf.columns else [])
     else:
         rename_dict = columns
+        selected_columns = list(rename_dict.keys())
+
+    gdf = gdf[selected_columns]
     gdf = gdf.rename(columns=rename_dict)
     if job_id:
         create_or_update_job(job_id, 60)

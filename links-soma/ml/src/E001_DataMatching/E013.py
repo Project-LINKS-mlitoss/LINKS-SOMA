@@ -343,8 +343,8 @@ class SuidoProcessor(DataProcessor):
             missing_month = [ ym for ym in basic_list if ym not in date_columns ]
 
             suido_status_pre = suido_status.loc[:,[cols_status['suido_number'],cols_status['usage_start_date'],cols_status['usage_end_date']]]
-            suido_status_pre = normalize_dates(suido_status, cols_status["usage_start_date"])
-            suido_status_pre = normalize_dates(suido_status, cols_status["usage_end_date"])
+            suido_status_pre = normalize_dates(suido_status_pre, cols_status["usage_start_date"])
+            suido_status_pre = normalize_dates(suido_status_pre, cols_status["usage_end_date"])
 
             suido_status_pre[cols_status['usage_start_date']] = suido_status_pre[cols_status['usage_start_date']].dt.strftime('%Y-%m')
             suido_status_pre[cols_status['usage_end_date']] = suido_status_pre[cols_status['usage_end_date']].dt.strftime('%Y-%m')
@@ -475,7 +475,10 @@ class SuidoProcessor(DataProcessor):
         else:
             row['start_date_水道使用量'] = row[start_day]
 
-        row['reference_date_水道使用量'] = 0 if pd.isnull(row[reference_date]) else row[reference_date]
+        if row.get(reference_date, None) is not None:
+            row['reference_date_水道使用量'] = 0 if pd.isnull(row[reference_date]) else row[reference_date]
+        else:
+            row['reference_date_水道使用量'] = 0
         return row
 
     def process(self):
@@ -784,6 +787,8 @@ class TatemonoProcessor(DataProcessor):
             "S造": ["S造", "鉄骨造"],
             "SRC造": ["SRC造", "鉄骨鉄筋コンクリート造"]
         }
+        structure_values  = ["木造", "RC造", "S造", "SRC造", "その他"]
+        df["structure_dummy"] = structure_values + [structure_values[-1]] * (len(df) - len(structure_values))
 
         df["構造名称"] = "その他"
         for key, values in structure_dict.items():
@@ -791,7 +796,11 @@ class TatemonoProcessor(DataProcessor):
             df.loc[df[cols["structure"]].str.contains(pattern, na=False), "構造名称"] = key
 
         label_encoder = LabelEncoder()
-        df["構造名称"] = label_encoder.fit_transform(df["構造名称"])
+        # Initialize and fit LabelEncoder on "structure_dummy" to ensure it learns all possible keys from structure_dict
+        df["structure_dummy"] = label_encoder.fit_transform(df["structure_dummy"])
+        # Encode "構造名称" using the previously fitted LabelEncoder
+        df["構造名称"] = df["構造名称"].map(lambda x: label_encoder.transform([x])[0] if x in label_encoder.classes_ else -1)
+        df = df.drop('structure_dummy', axis=1, errors='ignore')
 
         return df
 
@@ -947,7 +956,7 @@ def normalize_dates(df, column, formats=['%Y/%m/%d', '%Y-%m-%d', '%d/%m/%Y', '%d
     temp_column = f'{column}_normalized'
     df[temp_column] = np.nan
 
-    df[column] = df[column].astype(str).str.split().str[0]
+    df[column] = df[column].astype(str).str.split().str[0].str.rstrip('.0')
     # Try the provided formats on the invalid values
     for fmt in formats:
         mask = df[temp_column].isna() & df[column].notna()

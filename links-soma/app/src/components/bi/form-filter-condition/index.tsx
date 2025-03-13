@@ -6,7 +6,7 @@ import {
   mergeClasses,
   tokens,
 } from "@fluentui/react-components";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormContext } from "react-hook-form";
 import { getColumnMetadata } from "../../../utils/get-column-metadata";
 import { DialogBody } from "../../ui/dialog-body";
@@ -72,7 +72,12 @@ export const FormFilterCondition = ({
       filterCondition: currentFilterCondition,
     },
   });
-  const { fields, update, remove } = filterConditionField;
+  const { fields, update, remove, replace } = filterConditionField;
+
+  /** フォーカス切り替え時にダイアログに反映させるため */
+  useEffect(() => {
+    replace(currentFilterCondition);
+  }, [currentFilterCondition, replace]);
 
   const { watch, setValue: setEditViewFormValue } =
     useFormContext<EditViewFormType>();

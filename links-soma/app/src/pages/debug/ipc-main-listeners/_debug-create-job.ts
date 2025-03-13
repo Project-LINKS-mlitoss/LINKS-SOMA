@@ -6,14 +6,14 @@ import {
   job_tasks,
   job_results,
   type InsertJobTask,
-} from "../schema";
-import { db, dbDirectory, dbPath } from "../utils/db";
+} from "../../../schema";
+import { db, dbDirectory, dbPath } from "../../../utils/db";
 import {
   type PreprocessParameters,
   type ModelCreateParameters,
   type ExportParameters,
-} from "../@types/job-parameters";
-import { type IpcMainListener } from ".";
+} from "../../../@types/job-parameters";
+import { type IpcMainListener } from "../../../ipc-main-listeners";
 
 type Params = {
   job: "処理開始" | "処理完了" | "処理失敗";

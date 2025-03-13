@@ -6,10 +6,10 @@ import {
   data_set_results,
   type InsertDataSetDetailBuilding,
   type InsertDataSetResult,
-} from "../schema";
-import { db } from "../utils/db";
-import { TOYOTA_AREAS } from "./dummy-area";
-import { type IpcMainListener } from ".";
+} from "../../../schema";
+import { db } from "../../../utils/db";
+import { TOYOTA_AREAS } from "../_dummy-area";
+import { type IpcMainListener } from "../../../ipc-main-listeners";
 
 /** 開発用・実際にはアプリケーションからインサートすることはない */
 export const createDataSetResults = (async (

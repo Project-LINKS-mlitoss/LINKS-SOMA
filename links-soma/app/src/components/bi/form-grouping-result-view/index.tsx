@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Caption1,
   Dialog,
@@ -78,7 +78,7 @@ export const FormGroupingResultView = ({
 
   const {
     parameterFilters,
-    fieldArray: { fields, update },
+    fieldArray: { fields, update, replace },
     handleAppend,
     handleSave,
     handleRemove,
@@ -88,6 +88,14 @@ export const FormGroupingResultView = ({
     onSave,
     columnType,
   });
+
+  /** フォーカス切り替え時にダイアログに反映させるため */
+  useEffect(() => {
+    const groupingFields = parameters.filter((field) => {
+      return field.type === "group";
+    });
+    replace(groupingFields);
+  }, [parameters, replace]);
 
   const formatedParameterFilters = [...parameterFilters].filter((parameter) =>
     isGroupCondition(parameter),

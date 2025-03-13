@@ -1,6 +1,6 @@
-import { model_files } from "../schema";
-import { db } from "../utils/db";
-import { type IpcMainListener } from ".";
+import { model_files } from "../../../schema";
+import { db } from "../../../utils/db";
+import { type IpcMainListener } from "../../../ipc-main-listeners";
 
 export const _debugInsertModelFiles = (async (): Promise<void> => {
   db.insert(model_files)

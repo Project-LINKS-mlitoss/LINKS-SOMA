@@ -1,7 +1,6 @@
 import { Card, makeStyles, tokens } from "@fluentui/react-components";
 import { ButtonCreateModel } from "../../components/button-create-model";
 import { TableModel } from "../../components/table-model";
-import { Button } from "../../components/ui/button";
 import { TableJobsByType } from "../../components/table-jobs-by-type";
 import { BreadcrumbBase, BreadcrumbItem } from "../../components/ui/breadcrumb";
 import { ROUTES } from "../../routes";
@@ -51,19 +50,6 @@ export function Model(): JSX.Element {
 
         <TableJobsByType jobType="ml" />
       </Card>
-
-      <div>
-        <Button
-          onClick={() => {
-            window.ipcRenderer
-              .invoke("_debugInsertModelFiles")
-              .catch(console.error);
-          }}
-          size="small"
-        >
-          作成(debug)
-        </Button>
-      </div>
     </div>
   );
 }

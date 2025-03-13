@@ -11,7 +11,6 @@ import { Suspense } from "react";
 import { selectedResultSheetIdAtom } from "../../state/selected-result-sheet-id-atom";
 import { FormEditResultView } from "./form-edit-result-view";
 import { EditResultViewLayoutSort } from "./edit-result-view-layout-sort";
-import { DebugCreateDatasets } from "./_debug-create-datasets";
 
 const useStyles = makeStyles({
   drawer: {
@@ -52,8 +51,6 @@ export const SidebarEditResultView = (): JSX.Element => {
             <EditResultViewLayoutSort />
           </Suspense>
         </div>
-
-        <DebugCreateDatasets />
       </DrawerBody>
     </InlineDrawer>
   );

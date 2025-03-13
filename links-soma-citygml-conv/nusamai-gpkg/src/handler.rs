@@ -189,6 +189,10 @@ impl GpkgHandler {
     pub async fn begin(&mut self) -> Result<GpkgTransaction, GpkgError> {
         Ok(GpkgTransaction::new(self.pool.begin().await?))
     }
+
+    pub async fn close(&self) {
+        self.pool.close().await;
+    }
 }
 
 pub struct GpkgTransaction<'c> {

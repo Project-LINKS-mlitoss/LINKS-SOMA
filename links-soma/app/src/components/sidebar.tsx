@@ -8,6 +8,7 @@ import {
   FolderRegular,
   ArrowSyncCircleRegular,
   TableSwitchRegular,
+  Bug16Regular,
 } from "@fluentui/react-icons";
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
@@ -97,7 +98,7 @@ const menuItems = [
     value: "6",
     href: "#job",
   },
-];
+] as const;
 
 export const Sidebar = (): JSX.Element => {
   const styles = useStyles();
@@ -107,9 +108,10 @@ export const Sidebar = (): JSX.Element => {
   /** グローバルナビ以外をクリックして画面遷移することもあるのでstateを直接書き換える必要がある */
   const { pathname } = useLocation();
   useEffect(() => {
-    const value = menuItems.find((item) =>
-      pathname.replace("/", "").includes(item.href.replace("#", "")),
-    )?.value;
+    const value =
+      menuItems.find((item) =>
+        pathname.replace("/", "").includes(item.href.replace("#", "")),
+      )?.value || "99";
     if (value) {
       setSelectedValue(value);
     }
@@ -143,6 +145,24 @@ export const Sidebar = (): JSX.Element => {
             </NavItem>
           );
         })}
+
+        {process.env.NODE_ENV === "development" && (
+          <NavItem
+            key="99"
+            className={mergeClasses(
+              styles.navItem,
+              selectedValue === "99" ? styles.isActive : "",
+            )}
+            href="#debug"
+            style={{ marginTop: "auto" }}
+            value="99"
+          >
+            <div className={styles.menuItem}>
+              <Bug16Regular className={styles.icon} />
+              <div className={styles.label}>開発者向け</div>
+            </div>
+          </NavItem>
+        )}
       </NavDrawerBody>
     </NavDrawer>
   );

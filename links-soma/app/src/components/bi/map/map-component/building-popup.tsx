@@ -102,7 +102,7 @@ export const BuildingPopup = forwardRef<HTMLDivElement, Props>(
             <div className={styles.item}>
               <span className={styles.itemLabel}>水道使用量</span>
               <span className={styles.itemValue}>
-                {properties.total_water_usage}L
+                {properties.total_water_usage}立米
               </span>
             </div>
             <div className={styles.item}>
@@ -130,15 +130,6 @@ export const BuildingPopup = forwardRef<HTMLDivElement, Props>(
               <span className={styles.itemValue}>
                 {properties.structure_name}
               </span>
-            </div>
-          </div>
-          <div>
-            <h3 className={styles.heading}>
-              <span className={mergeClasses(styles.square, styles.otherIcon)} />
-              その他
-            </h3>
-            <div className={styles.item}>
-              <span>災害避難経路等の情報表示</span>
             </div>
           </div>
         </div>

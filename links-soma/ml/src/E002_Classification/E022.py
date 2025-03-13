@@ -374,7 +374,11 @@ def insert_sqlite(input_data, data_set_result_id):
 
         # Replace NaN, None, and empty values with the found value (or leave it empty if no valid value is found)
         input_data['reference_date'] = input_data['reference_date'].replace([None, '', pd.NA], reference_date_value)
-        
+
+        if input_data.get("structure_name", None) is not None:
+            structure_map = { 0: "RC造", 1: "SRC造", 2:"S造", 3:"その他", 4:"木造" }
+            input_data["structure_name"] = input_data["structure_name"].map(structure_map).fillna(input_data["structure_name"])
+
         is_success = create_data_set_detail_buildings_or_area(input_data)
         if not is_success:
             raise

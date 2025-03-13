@@ -668,7 +668,8 @@ def add_residenceID(gdf):
     # 'buildingID'列とランダムに生成された文字列を結合して'residenceID'列を作成
     gdf = gdf.reset_index(drop=True)
     gdf['residenceID'] = gdf['building_id'].astype(str) + '-' + gdf.apply(lambda _: generate_random_string(), axis=1)
-    
+    return gdf
+
 def add_keycode(gdf, gpkg_path):
     """
     出力するデータに地域コードと町丁字名の付与を行う
@@ -813,7 +814,7 @@ def process_data(tatemono_path, e14_merged_path, gpkg_path, ken, sikuchoson, opt
             create_or_update_job(job_id, "85")
             create_or_update_job_task(job_id, progress_percent="50", preprocess_type="e016", error_code=None, error_msg=None, result=None, id= task_id)
         # 住居IDを追加
-        add_residenceID(tatemono_use_point)
+        tatemono_use_point = add_residenceID(tatemono_use_point)
         
         if job_id:
             create_or_update_job_task(job_id, progress_percent="70", preprocess_type="e016", error_code=None, error_msg=None, result=None, id= task_id)

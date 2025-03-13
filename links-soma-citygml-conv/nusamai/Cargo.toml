@@ -55,6 +55,8 @@ atlas-packer = { git = "https://github.com/MIERUNE/atlas-packer.git" }
 # atlas-packer = { path = "../atlas_packer" };
 tempfile = "3.14.0"
 glam = "0.29.2"
+zip = "0.6"
+walkdir = "2.4"
 
 [dev-dependencies]
 rand = "0.8.5"

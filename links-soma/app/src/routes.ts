@@ -29,6 +29,7 @@ export const ROUTES = {
     ROOT: "/evaluation",
     CREATE: "/evaluation/create",
   },
+  DEBUG: "/debug",
 } as const;
 
 export const withHash = (path: string): string => `#${path}`;

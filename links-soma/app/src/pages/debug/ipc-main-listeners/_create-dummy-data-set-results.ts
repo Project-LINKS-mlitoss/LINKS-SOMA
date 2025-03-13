@@ -5,11 +5,11 @@ import {
   data_set_results,
   data_set_detail_areas,
   data_set_detail_buildings,
-} from "../schema";
-import { db } from "../utils/db";
-import { getFilePathInDummyData } from "../utils/get-file-path-in-dummy-data";
-import { TOYOTA_AREAS } from "./dummy-area";
-import { type IpcMainListener } from ".";
+} from "../../../schema";
+import { db } from "../../../utils/db";
+import { getFilePathInDummyData } from "../../../utils/get-file-path-in-dummy-data";
+import { TOYOTA_AREAS } from "../_dummy-area";
+import { type IpcMainListener } from "../../../ipc-main-listeners";
 
 // 開発用
 export const createDummyDataSetResults = (async (
