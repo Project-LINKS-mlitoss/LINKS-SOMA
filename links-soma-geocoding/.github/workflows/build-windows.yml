@@ -1,0 +1,78 @@
+name: Build Windows App
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  BUILDS_BUCKET: links-soma
+  WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+  SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up GCloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "yarn"
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build Windows app
+        run: yarn dist:win
+
+      - name: Create zip if not already zipped
+        run: |
+          $distFolder = "dist"
+          $exeFiles = Get-ChildItem -Path $distFolder -Filter "*.exe" -Recurse
+          $zipFiles = Get-ChildItem -Path $distFolder -Filter "*.zip" -Recurse
+
+          if ($zipFiles.Count -eq 0 -and $exeFiles.Count -gt 0) {
+            $appName = "links-soma-geocoding"
+            $zipPath = Join-Path $distFolder "$appName.zip"
+            Compress-Archive -Path "$distFolder\*.exe" -DestinationPath $zipPath -Force
+            Write-Host "Created zip file at $zipPath"
+          } else {
+            Write-Host "Zip file already exists or no exe files found"
+          }
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: links-soma-geocoding.zip
+          path: |
+            dist/*.exe
+            dist/*.zip
+          retention-days: 14
+
+      - name: debug ls
+        run: Get-ChildItem -Path .
+
+      - name: debug ls dist
+        run: Get-ChildItem -Path dist
+
+      - name: Upload to GCS
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: dist/links-soma-geocoding.zip
+          destination: ${{ env.BUILDS_BUCKET }}/build/geocoding/
+          parent: false

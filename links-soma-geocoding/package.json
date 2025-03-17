@@ -1,5 +1,6 @@
 {
   "name": "geocoding-app",
+  "productName": "LINKS SOMA ジオコーディング",
   "private": true,
   "version": "0.0.0",
   "type": "commonjs",
@@ -9,9 +10,9 @@
     "build": "npm run build:main && npm run build:renderer",
     "electron:dev": "npm run build && electron ./electron/dist/main.js",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist": "npm run build && electron-builder --publish=never",
+    "dist:mac": "npm run build && electron-builder --mac --publish=never",
+    "dist:win": "npm run build && electron-builder --win --publish=never"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.56.2",
@@ -45,7 +46,7 @@
   },
   "build": {
     "appId": "jp.go.mlit.geocoding.soma.geocoding",
-    "productName": "LINKS SOMA Geocoding app",
+    "productName": "LINKS SOMA ジオコーディング",
     "directories": {
       "output": "dist"
     },
@@ -58,10 +59,19 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "icon": "dist/icon.icns"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "dist/icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "dist/icon.png"
     }
   },
   "main": "electron/dist/main.js"

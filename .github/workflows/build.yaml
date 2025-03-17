@@ -1,0 +1,72 @@
+name: Build Combined Zip
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-zip:
+    runs-on: ubuntu-latest
+
+    env:
+      GCS_BUCKET: links-soma
+      REGIONS: |
+        - hokkaido
+        - tohoku
+        - kanto
+        - chubu
+        - kansai
+        - chugoku
+        - shikoku
+        - kyushu
+      WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+      SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up GCloud Auth
+        uses: google-github-actions/auth@v2
+        with:
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Download zip files from GCS
+        run: |
+          mkdir -p downloads/soma
+          mkdir -p downloads/geocoding
+          mkdir -p downloads/conv
+          for REGION in $(echo "$REGIONS" | sed 's/- //g'); do
+            gcloud storage cp gs://$GCS_BUCKET/build/$REGION/links-soma.zip downloads/soma/$REGION-links-soma.zip
+          done
+
+      - name: Download geocoding zip and conv zip files
+        run: |
+          gcloud storage cp gs://$GCS_BUCKET/geocoding/links-soma-geocoding.zip downloads/geocoding/
+          gcloud storage cp gs://$GCS_BUCKET/conv/links-soma-conv.zip downloads/conv/
+
+      - name: Create region-specific zip files
+        run: |
+          mkdir -p region_zips
+          for REGION in $(echo "$REGIONS" | sed 's/- //g'); do
+            mkdir -p temp/$REGION
+            # Extract region-specific soma data
+            unzip -q downloads/soma/$REGION-links-soma.zip -d temp/$REGION/soma
+            # Extract common geocoding data
+            unzip -q downloads/geocoding/links-soma-geocoding.zip -d temp/$REGION/geocoding
+            # Extract common conv data
+            unzip -q downloads/conv/links-soma-conv.zip -d temp/$REGION/conv
+            # Create combined zip for this region
+            (cd temp/$REGION && zip -r ../../../region_zips/$REGION-combined.zip .)
+          done
+
+      - name: Upload region zip files as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: region-zip-files
+          path: region_zips/*.zip
