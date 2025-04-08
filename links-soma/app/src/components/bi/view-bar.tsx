@@ -42,7 +42,9 @@ export const ViewBar = ({ view }: Props): JSX.Element => {
     /** 表示のために桁数を調整 */
     y: isPercentValue
       ? Math.floor(d.y * 1000) / 10
-      : Number.parseFloat(d.y.toFixed(1)),
+      : d.y
+        ? Number.parseFloat(d.y.toFixed(1))
+        : 0,
   }));
 
   const [tooltipPosition, setTooltipPosition] = useState<{

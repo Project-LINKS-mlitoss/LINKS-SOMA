@@ -265,7 +265,7 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       label: "最大使用水量",
       type: "integer",
       groupable: true,
-      unit: "L",
+      unit: "立米",
       description:
         "推定日から１年以内において水道使用量が最大の月の水道使用量（検針周期により２か月単位の量）",
     },
@@ -273,7 +273,7 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       label: "平均使用水量",
       type: "integer",
       groupable: true,
-      unit: "L",
+      unit: "立米",
       description:
         "推定日から１年以内における月の平均水道使用量（検針周期により２か月単位の量）",
     },
@@ -281,7 +281,7 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       label: "最小使用水量",
       type: "integer",
       groupable: true,
-      unit: "L",
+      unit: "立米",
       description:
         "推定日から１年以内において水道使用量が最小の月の水道使用量（検針周期により２か月単位の量）",
     },
@@ -289,7 +289,7 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       label: "合計使用水量",
       type: "integer",
       groupable: true,
-      unit: "L",
+      unit: "立米",
       description:
         "推定日から１年以内における合計水道使用量（検針周期により２か月単位の量）",
     },

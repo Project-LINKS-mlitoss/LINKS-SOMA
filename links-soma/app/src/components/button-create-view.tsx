@@ -1,10 +1,10 @@
-import { useAtom } from "jotai";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { AddFilled } from "@fluentui/react-icons";
-import { selectedResultSheetIdAtom } from "../state/selected-result-sheet-id-atom";
+import { useNavigate } from "react-router-dom";
 import { useFetchResultViews } from "../hooks/use-fetch-result-views";
 import { useFetchDataSetResults } from "../hooks/use-fetch-data-set-results";
-import { selectedResultViewIdAtom } from "../state/selected-result-view-id-atom";
+import { ROUTES } from "../routes";
+import { useWorkbookIdsSearchQuery } from "../bi-modules/hooks/use-workbook-ids-search-query";
 import { Button } from "./ui/button";
 
 const useStyles = makeStyles({
@@ -17,11 +17,12 @@ const useStyles = makeStyles({
 
 export const ButtonCreateView = (): JSX.Element => {
   const styles = useStyles();
+  const navigate = useNavigate();
+  const { workbookId, sheetId } = useWorkbookIdsSearchQuery();
   const { data: dataSetResults } = useFetchDataSetResults();
-  const [, setSelectedResultViewId] = useAtom(selectedResultViewIdAtom);
-  const [selectedResultSheetId] = useAtom(selectedResultSheetIdAtom);
+
   const { data: resultViews, mutate } = useFetchResultViews({
-    sheetId: selectedResultSheetId,
+    sheetId: Number(sheetId),
   });
   const handleClick = async (): Promise<void> => {
     if (!resultViews) return;
@@ -30,13 +31,21 @@ export const ButtonCreateView = (): JSX.Element => {
       "insertResultViews",
       {
         data_set_result_id: dataSetResults?.[0]?.id,
-        sheet_id: selectedResultSheetId,
+        sheet_id: Number(sheetId),
         layoutIndex: newLayoutIndex,
         parameters: [],
       },
     );
     await mutate();
-    setSelectedResultViewId(insertedId);
+    navigate(
+      ROUTES.ANALYSIS.WORKBOOK_EDIT({
+        id: workbookId,
+        queryParams: {
+          sheetId,
+          viewId: insertedId,
+        },
+      }),
+    );
   };
 
   const isMaxViewLength = !!resultViews && resultViews.length >= 8;

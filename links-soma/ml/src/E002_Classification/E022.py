@@ -432,15 +432,16 @@ def process_and_predict(input_folder, input_file, model_directory, threshold, ou
         input_data = read_csv(input_path)
 
         # '世帯コード'の重複を確認し、重複するレコードを削除
-        duplicates = input_data['世帯コード'].duplicated(keep=False)  # keep=False で全重複行をTrueとする
-        input_data = input_data[~duplicates].reset_index(drop=True)
+        input_data = input_data.drop_duplicates(subset=['世帯コード'], keep='first').reset_index(drop=True)
         condition = (input_data['住定期間'] < 1000)
-        input_data = input_data[~condition].reset_index(drop=True)
+        if any(condition) and len(condition) > 0:
+            input_data = input_data[~condition].reset_index(drop=True)
 
         # '正規化住所'の重複を確認し、3件以上の重複がある場合、該当するすべてのレコードを削除
         duplicate_counts = input_data['正規化住所'].value_counts()  # 各値の出現回数を取得
         to_remove = duplicate_counts[duplicate_counts >= 2].index  # 3件以上の値を取得
-        input_data = input_data[~input_data['正規化住所'].isin(to_remove)].reset_index(drop=True)  # 該当値を除外
+        if any(to_remove) and len(to_remove) > 0:
+            input_data = input_data[~input_data['正規化住所'].isin(to_remove)].reset_index(drop=True)  # 該当値を除外
         
         if sqlite_enabled and job_id:
             create_or_update_job_task(job_id, progress_percent="20", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)

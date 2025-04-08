@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Caption1,
   Dialog,
@@ -6,7 +6,6 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { type UseFormReturn } from "react-hook-form";
 import { type ChartColumnType } from "../../../@types/charts";
 import { Button } from "../../ui/button";
 import { DialogBody } from "../../ui/dialog-body";
@@ -55,7 +54,6 @@ type Props = {
   columnLabel: string;
   columnType: ChartColumnType;
   unit?: string;
-  formGroupingResultView: UseFormReturn<{ parameters: Parameter[] }>;
   onSave: (parameters: Parameter[]) => void;
 };
 
@@ -68,36 +66,23 @@ export const FormGroupingResultView = ({
   columnLabel,
   onSave,
   columnType,
-  formGroupingResultView,
 }: Props): JSX.Element => {
   const [open, setOpen] = useState(false);
 
   const styles = useStyles();
 
-  const { register } = formGroupingResultView;
-
   const {
-    parameterFilters,
-    fieldArray: { fields, update, replace },
+    fieldArray: { fields, update },
     handleAppend,
     handleSave,
     handleRemove,
+    formRegister,
   } = useFormGroupingResultView({
-    formGroupingResultView,
-    parameters,
     onSave,
     columnType,
   });
 
-  /** フォーカス切り替え時にダイアログに反映させるため */
-  useEffect(() => {
-    const groupingFields = parameters.filter((field) => {
-      return field.type === "group";
-    });
-    replace(groupingFields);
-  }, [parameters, replace]);
-
-  const formatedParameterFilters = [...parameterFilters].filter((parameter) =>
+  const formatedParameterFilters = fields.filter((parameter) =>
     isGroupCondition(parameter),
   );
 
@@ -111,10 +96,10 @@ export const FormGroupingResultView = ({
       >
         <DialogTrigger>
           <Button
-            appearance={parameterFilters.length === 0 ? "outline" : "primary"}
+            appearance={fields.length === 0 ? "outline" : "primary"}
             size="medium"
           >
-            {parameterFilters.length === 0
+            {fields.length === 0
               ? "ラベルのグループを追加"
               : "ラベルのグループを編集"}
           </Button>
@@ -144,10 +129,10 @@ export const FormGroupingResultView = ({
                             key={field.id}
                             field={field}
                             handleRemove={() => handleRemove(index)}
-                            labelRegister={register(
+                            labelRegister={formRegister(
                               `parameters.${index}.value.label`,
                             )}
-                            operationRegister={register(
+                            operationRegister={formRegister(
                               `parameters.${index}.value.operation`,
                             )}
                           />
@@ -158,13 +143,13 @@ export const FormGroupingResultView = ({
                             key={field.id}
                             field={field}
                             handleRemove={() => handleRemove(index)}
-                            labelRegister={register(
+                            labelRegister={formRegister(
                               `parameters.${index}.value.label`,
                             )}
-                            operationRegister={register(
+                            operationRegister={formRegister(
                               `parameters.${index}.value.operation`,
                             )}
-                            valueRegister={register(
+                            valueRegister={formRegister(
                               `parameters.${index}.value.value`,
                             )}
                           />
@@ -177,7 +162,7 @@ export const FormGroupingResultView = ({
                             field={field}
                             handleRemove={() => handleRemove(index)}
                             index={index}
-                            register={register}
+                            register={formRegister}
                           />
                         );
                       case "float":
@@ -190,7 +175,7 @@ export const FormGroupingResultView = ({
                             field={field}
                             handleRemove={() => handleRemove(index)}
                             index={index}
-                            register={register}
+                            register={formRegister}
                             unit={unit}
                             update={(e) => {
                               const referenceColumnType =

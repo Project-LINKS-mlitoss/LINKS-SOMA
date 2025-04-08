@@ -7,12 +7,11 @@ import {
   Input,
 } from "@fluentui/react-components";
 import { useRef, useState } from "react";
-import { type FormProps } from "react-router-dom";
-import { useAtom } from "jotai";
+import { useNavigate, type FormProps } from "react-router-dom";
 import { type SelectResultSheet } from "../schema";
 import { useOnClickOutside } from "../hooks/use-on-click-outside";
-import { selectedResultSheetIdAtom } from "../state/selected-result-sheet-id-atom";
 import { useFetchResultSheets } from "../hooks/use-fetch-result-sheets";
+import { ROUTES } from "../routes";
 import { DialogSurface } from "./ui/dialog-surface";
 import { DialogBody } from "./ui/dialog-body";
 import { DialogTitle } from "./ui/dialog-title";
@@ -38,6 +37,8 @@ export const ButtonEditableSheetTitle = ({
   resultSheet,
 }: Props): JSX.Element => {
   const styles = useStyles();
+  const navigate = useNavigate();
+
   const [isEditing, setIsEditing] = useState(false);
   // Dialogの開閉でonClickOutsideを制御するためのstate
   const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -45,7 +46,6 @@ export const ButtonEditableSheetTitle = ({
   const { mutate } = useFetchResultSheets({
     workbookId: resultSheet.workbook_id,
   });
-  const [, setSelectedResultSheetId] = useAtom(selectedResultSheetIdAtom);
 
   const [title, setTitle] = useState(resultSheet.title || "");
   const updateTitle = (): void => {
@@ -76,8 +76,11 @@ export const ButtonEditableSheetTitle = ({
     await deleteResultSheet();
     // 削除後にシート一覧を再取得する
     void mutate();
-    // 選択中のシートを解除する
-    setSelectedResultSheetId(undefined);
+    navigate(
+      ROUTES.ANALYSIS.WORKBOOK_EDIT({
+        id: String(resultSheet.workbook_id),
+      }),
+    );
   };
 
   const ref = useRef(null);

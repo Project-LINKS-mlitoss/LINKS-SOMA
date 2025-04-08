@@ -6,9 +6,7 @@ import {
   DrawerHeader,
   DrawerBody,
 } from "@fluentui/react-components";
-import { useAtom } from "jotai";
 import { Suspense } from "react";
-import { selectedResultSheetIdAtom } from "../../state/selected-result-sheet-id-atom";
 import { FormEditResultView } from "./form-edit-result-view";
 import { EditResultViewLayoutSort } from "./edit-result-view-layout-sort";
 
@@ -35,7 +33,6 @@ const useStyles = makeStyles({
 
 export const SidebarEditResultView = (): JSX.Element => {
   const styles = useStyles();
-  const [selectedResultSheetId] = useAtom(selectedResultSheetIdAtom);
 
   return (
     <InlineDrawer className={styles.drawer} open>
@@ -47,7 +44,7 @@ export const SidebarEditResultView = (): JSX.Element => {
       <DrawerBody>
         <div className={styles.drawerBodyInner}>
           <Suspense>
-            <FormEditResultView selectedResultSheetId={selectedResultSheetId} />
+            <FormEditResultView />
             <EditResultViewLayoutSort />
           </Suspense>
         </div>

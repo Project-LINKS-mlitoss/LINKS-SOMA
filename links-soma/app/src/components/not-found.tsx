@@ -1,4 +1,4 @@
-import { makeStyles, tokens } from "@fluentui/react-components";
+import { Caption1, makeStyles, tokens } from "@fluentui/react-components";
 import { Button } from "./ui/button";
 
 const useStyles = makeStyles({
@@ -12,8 +12,14 @@ const useStyles = makeStyles({
   },
   content: {
     flex: "1",
-    padding: tokens.spacingVerticalL,
+    padding: tokens.spacingVerticalM,
     backgroundColor: tokens.colorNeutralBackground3,
+  },
+  url: {
+    fontSize: tokens.fontSizeBase300,
+    padding: `${tokens.spacingVerticalL}`,
+    margin: `${tokens.spacingVerticalM} 0`,
+    backgroundColor: tokens.colorNeutralBackground2,
   },
   footer: {
     padding: `${tokens.spacingVerticalM} 0`,
@@ -22,11 +28,19 @@ const useStyles = makeStyles({
 
 export const NotFound = (): JSX.Element => {
   const styles = useStyles();
+  const path = window.location.hash;
 
   return (
     <div className={styles.content}>
       <h2 className={styles.heading}>404 Not Found</h2>
       <p>ページが見つかりませんでした。</p>
+      {path && (
+        <div className={styles.url}>
+          <Caption1>アクセスしようとしたリソース:</Caption1>
+          <br />
+          <code>{path}</code>
+        </div>
+      )}
 
       <div className={styles.footer}>
         <Button as="a" href="#/">

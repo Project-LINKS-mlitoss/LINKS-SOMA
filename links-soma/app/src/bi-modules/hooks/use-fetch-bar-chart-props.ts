@@ -8,8 +8,8 @@ import {
 } from "../../hooks/use-pagination";
 import { useIsLoading } from "../../hooks/use-is-loading";
 import { submittedEditViewFormAtom } from "../../state/submitted-edit-view-form-atom";
-import { selectedResultViewIdAtom } from "../../state/selected-result-view-id-atom";
 import { useChartProps } from "./use-chart-props";
+import { useWorkbookIdsSearchQuery } from "./use-workbook-ids-search-query";
 
 type Params = {
   view: BarView;
@@ -27,7 +27,7 @@ export const useFetchBarChartProps = ({ view }: Params): ReturnType => {
   const { chartProps, handleChartProps } = useChartProps();
   const { isLoading, handleIsLoading } = useIsLoading({ init: true });
 
-  const selectedResultViewId = useAtomValue(selectedResultViewIdAtom);
+  const { viewId } = useWorkbookIdsSearchQuery();
   const setSubmittedEditViewFormState = useAtomValue(submittedEditViewFormAtom);
 
   const fetch = useCallback(
@@ -59,10 +59,10 @@ export const useFetchBarChartProps = ({ view }: Params): ReturnType => {
   }, [fetch]);
 
   useEffect(() => {
-    if (setSubmittedEditViewFormState && selectedResultViewId === view.id) {
+    if (setSubmittedEditViewFormState && Number(viewId) === view.id) {
       fetch(view).catch(console.error);
     }
-  }, [setSubmittedEditViewFormState, fetch, view, selectedResultViewId]);
+  }, [setSubmittedEditViewFormState, fetch, view, viewId]);
 
   return {
     chartProps,

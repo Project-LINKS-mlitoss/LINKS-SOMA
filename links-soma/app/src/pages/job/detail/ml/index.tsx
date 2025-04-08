@@ -13,6 +13,7 @@ import {
   PolarGrid,
   PolarAngleAxis,
   PolarRadiusAxis,
+  Tooltip as ReTooltip,
 } from "recharts";
 import { ArrowLeftRegular } from "@fluentui/react-icons";
 import { DialogSaveWithName } from "../../../../components/dialog-save-with-name";
@@ -343,6 +344,7 @@ export function MlDetail(): JSX.Element {
                 name="指標"
                 stroke={isLowAccuracy ? ERROR_COLOR : SAFE_COLOR}
               />
+              <ReTooltip />
             </RadarChart>
             {isLowAccuracy && (
               <div className={styles.detail}>

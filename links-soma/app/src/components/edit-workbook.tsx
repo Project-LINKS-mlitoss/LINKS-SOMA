@@ -1,7 +1,7 @@
-import { useParams } from "react-router-dom";
 import { makeStyles, tokens } from "@fluentui/react-components";
 import { useFetchWorkbook } from "../hooks/use-fetch-workbook";
 import { ROUTES } from "../routes";
+import { useWorkbookIdsSearchQuery } from "../bi-modules/hooks/use-workbook-ids-search-query";
 import { TabListEditResultSheet } from "./tab-list-edit-result-sheet";
 import { SidebarEditResultView } from "./bi/sidebar-edit-result-view";
 import { PreviewResultSheet } from "./preview-result-sheet";
@@ -48,8 +48,10 @@ export const EditWorkbook = (): JSX.Element => {
 
 function Content(): JSX.Element {
   const styles = useStyles();
-  const { id } = useParams();
-  const { data: workbook } = useFetchWorkbook({ id: Number(id) });
+
+  const { workbookId, sheetId } = useWorkbookIdsSearchQuery();
+
+  const { data: workbook } = useFetchWorkbook({ id: Number(workbookId) });
 
   return (
     <div className={styles.content}>
@@ -61,22 +63,24 @@ function Content(): JSX.Element {
           },
           {
             children: "詳細",
-            href: ROUTES.ANALYSIS.WORKBOOK_DETAIL(id || ""),
+            href: ROUTES.ANALYSIS.WORKBOOK_DETAIL(workbookId),
           },
           {
             children: "編集",
             current: true,
-            href: ROUTES.ANALYSIS.WORKBOOK_EDIT(id || ""),
+            href: ROUTES.ANALYSIS.WORKBOOK_EDIT({
+              id: workbookId,
+            }),
           },
         ].map((item) => (
           <BreadcrumbItem key={item.href} {...item} />
         ))}
       />
       <h2 className={styles.heading}>{workbook?.title}</h2>
-      <TabListEditResultSheet workbookId={workbook?.id} />
-      <div>
-        <PreviewResultSheet />
-      </div>
+      {workbook && (
+        <TabListEditResultSheet sheetId={sheetId} workbookId={workbook.id} />
+      )}
+      <div>{sheetId && <PreviewResultSheet sheetId={sheetId} />}</div>
     </div>
   );
 }

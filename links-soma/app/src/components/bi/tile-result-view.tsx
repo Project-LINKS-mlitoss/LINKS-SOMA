@@ -15,12 +15,11 @@ import {
   tokens,
   Option,
 } from "@fluentui/react-components";
-import { useAtom } from "jotai";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { type SelectResultView } from "../../schema";
 import { THEME_COLORS } from "../../config/theme-colors";
 import { useFetchResultViews } from "../../hooks/use-fetch-result-views";
-import { selectedResultViewIdAtom } from "../../state/selected-result-view-id-atom";
 import { DialogSurface } from "../ui/dialog-surface";
 import { DialogBody } from "../ui/dialog-body";
 import { DialogTitle } from "../ui/dialog-title";
@@ -33,6 +32,8 @@ import { useDialogState } from "../../hooks/use-dialog-state";
 import { DialogExportMessage } from "../dialog-export-message";
 import { OUTPUT_FILE_TYPES } from "../../config/file-types";
 import { type View } from "../../bi-modules/interfaces/view";
+import { ROUTES } from "../../routes";
+import { useWorkbookIdsSearchQuery } from "../../bi-modules/hooks/use-workbook-ids-search-query";
 import { TileViewStyle } from "./tile-view-style";
 
 type Props = {
@@ -88,9 +89,10 @@ export const TileResultView = ({
   focusable,
 }: Props): JSX.Element => {
   const styles = useStyles();
-  const [selectedResultViewId, setSelectedResultViewId] = useAtom(
-    selectedResultViewIdAtom,
-  );
+  const navigate = useNavigate();
+
+  const { workbookId, viewId } = useWorkbookIdsSearchQuery();
+
   const exportMessageDialogState = useDialogState();
 
   const { mutate } = useFetchResultViews({
@@ -98,7 +100,15 @@ export const TileResultView = ({
   });
 
   const handleClick = (): void => {
-    setSelectedResultViewId(resultView.id);
+    navigate(
+      ROUTES.ANALYSIS.WORKBOOK_EDIT({
+        id: workbookId || "",
+        queryParams: {
+          sheetId: resultView.sheet_id,
+          viewId: resultView.id,
+        },
+      }),
+    );
   };
 
   const handleDownload = async (
@@ -131,10 +141,9 @@ export const TileResultView = ({
       sheetId: resultView.sheet_id,
     });
     await mutate();
-    setSelectedResultViewId(undefined);
   };
 
-  const selected = resultView.id === selectedResultViewId;
+  const selected = String(resultView.id) === viewId;
   const isInvalidParameters =
     !resultView.style ||
     !resultView.unit ||

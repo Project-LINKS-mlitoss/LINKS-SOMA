@@ -85,19 +85,19 @@ const buildingMetadata: Record<keyof SelectDataSetDetailBuilding, Item> = {
   },
   max_water_usage: {
     label: "水道最大使用量",
-    unit: "L",
+    unit: "立米",
   },
   avg_water_usage: {
     label: "水道平均使用量",
-    unit: "L",
+    unit: "立米",
   },
   min_water_usage: {
     label: "水道最小使用量",
-    unit: "L",
+    unit: "立米",
   },
   total_water_usage: {
     label: "水道合計使用量",
-    unit: "L",
+    unit: "立米",
   },
   change_ratio_water_usage: {
     label: "水道使用量変化率",

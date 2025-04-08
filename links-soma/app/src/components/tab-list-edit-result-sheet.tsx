@@ -1,10 +1,9 @@
 import { AddFilled } from "@fluentui/react-icons";
 import { makeStyles, TabList, tokens } from "@fluentui/react-components";
-import { useAtom } from "jotai";
+import { useNavigate } from "react-router-dom";
 import { useEffect } from "react";
-import { selectedResultSheetIdAtom } from "../state/selected-result-sheet-id-atom";
 import { useFetchResultSheets } from "../hooks/use-fetch-result-sheets";
-import { selectedResultViewIdAtom } from "../state/selected-result-view-id-atom";
+import { ROUTES } from "../routes";
 import { Button } from "./ui/button";
 import { ButtonEditableSheetTitle } from "./button-editable-sheet-title";
 import { Tab } from "./ui/tab";
@@ -24,27 +23,38 @@ const useStyles = makeStyles({
 });
 
 interface Props {
-  workbookId: number | undefined;
+  workbookId: number;
+  sheetId?: string | null;
 }
 
 export const TabListEditResultSheet = ({
   workbookId,
+  sheetId,
 }: Props): JSX.Element | null => {
   const styles = useStyles();
+  const navigate = useNavigate();
+
   const { data: resultSheets, mutate } = useFetchResultSheets({
     workbookId,
   });
-  const [selectedResultSheetId, setSelectedResultSheetId] = useAtom(
-    selectedResultSheetIdAtom,
-  );
-  const [, setSelectedResultViewId] = useAtom(selectedResultViewIdAtom);
 
+  /** sheetIdがクエリパラメータにない場合 */
   useEffect(() => {
-    if (!resultSheets || resultSheets?.length === 0) return;
-    setSelectedResultSheetId((prev) => prev || resultSheets[0].id);
-  }, [resultSheets, setSelectedResultSheetId]);
+    if (!resultSheets || resultSheets.length === 0 || !workbookId) return;
+    if (!sheetId) {
+      const firstSheetId = resultSheets[0].id;
+      navigate(
+        ROUTES.ANALYSIS.WORKBOOK_EDIT({
+          id: workbookId,
+          queryParams: {
+            sheetId: firstSheetId,
+          },
+        }),
+      );
+    }
+  }, [sheetId, resultSheets, workbookId, navigate]);
 
-  if (!workbookId || !selectedResultSheetId || !resultSheets) return null;
+  if (!resultSheets) return null;
 
   return (
     <div className={styles.root}>
@@ -60,8 +70,14 @@ export const TabListEditResultSheet = ({
             },
           );
           void mutate();
-          setSelectedResultSheetId(insertedId);
-          setSelectedResultViewId(undefined);
+          navigate(
+            ROUTES.ANALYSIS.WORKBOOK_EDIT({
+              id: workbookId,
+              queryParams: {
+                sheetId: insertedId,
+              },
+            }),
+          );
         }}
         shape="square"
       >
@@ -70,22 +86,20 @@ export const TabListEditResultSheet = ({
       <TabList
         className={styles.tabList}
         onTabSelect={async (_, data) => {
-          if (!data.value || typeof data.value !== "number") return;
-          setSelectedResultSheetId(data.value);
-          const resultViews = await window.ipcRenderer.invoke(
-            "selectResultViews",
-            {
-              sheetId: data.value,
-            },
+          if (!data.value || typeof data.value !== "string") return;
+          navigate(
+            ROUTES.ANALYSIS.WORKBOOK_EDIT({
+              id: workbookId,
+              queryParams: {
+                sheetId: data.value,
+              },
+            }),
           );
-          const firstView = resultViews.find((view) => view.layoutIndex === 1);
-          if (!firstView) return setSelectedResultViewId(undefined);
-          setSelectedResultViewId(firstView.id);
         }}
-        selectedValue={selectedResultSheetId}
+        selectedValue={sheetId}
       >
         {resultSheets.map((item) => (
-          <Tab key={item.id} id={item.title || ""} value={item.id}>
+          <Tab key={item.id} id={item.title || ""} value={String(item.id)}>
             <ButtonEditableSheetTitle
               resultSheet={{
                 id: item.id,

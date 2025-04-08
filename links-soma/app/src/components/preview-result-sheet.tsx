@@ -1,7 +1,5 @@
 import { makeStyles } from "@fluentui/react-components";
-import { useAtom } from "jotai";
 import { useFetchResultViews } from "../hooks/use-fetch-result-views";
-import { selectedResultSheetIdAtom } from "../state/selected-result-sheet-id-atom";
 import { TileResultView } from "./bi/tile-result-view";
 import { ButtonCreateView } from "./button-create-view";
 import { EmptyEditResultViews } from "./empty-edit-result-views";
@@ -44,14 +42,17 @@ const useStyles = makeStyles({
   },
 });
 
+type Props = {
+  sheetId: string;
+};
+
 /**
  * ビューの追加画面で表示されるシートのプレビュー
  */
-export const PreviewResultSheet = (): JSX.Element | null => {
+export const PreviewResultSheet = ({ sheetId }: Props): JSX.Element | null => {
   const styles = useStyles();
-  const [selectedResultSheetId] = useAtom(selectedResultSheetIdAtom);
   const { data } = useFetchResultViews({
-    sheetId: selectedResultSheetId,
+    sheetId: Number(sheetId),
   });
 
   if (!data) return null;

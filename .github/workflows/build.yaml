@@ -8,22 +8,18 @@ permissions:
   contents: read
 
 jobs:
-  build-zip:
+  build-region-zip:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        region:
+          [hokkaido, tohoku, kanto, chubu, kansai, chugoku, shikoku, kyushu]
+      fail-fast: false
     env:
       GCS_BUCKET: links-soma
-      REGIONS: |
-        - hokkaido
-        - tohoku
-        - kanto
-        - chubu
-        - kansai
-        - chugoku
-        - shikoku
-        - kyushu
       WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
       SERVICE_ACCOUNT: ${{ secrets.SERVICE_ACCOUNT }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,40 +29,69 @@ jobs:
         with:
           service_account: ${{ env.SERVICE_ACCOUNT }}
           workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
-      - name: Set up Cloud SDK
+
+      - name: Setup Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
-      - name: Download zip files from GCS
+      - name: Download files for region ${{ matrix.region }}
         run: |
-          mkdir -p downloads/soma
+          mkdir -p downloads/soma/${{ matrix.region }}
           mkdir -p downloads/geocoding
-          mkdir -p downloads/conv
-          for REGION in $(echo "$REGIONS" | sed 's/- //g'); do
-            gcloud storage cp gs://$GCS_BUCKET/build/$REGION/links-soma.zip downloads/soma/$REGION-links-soma.zip
-          done
+          mkdir -p downloads/converter
 
-      - name: Download geocoding zip and conv zip files
-        run: |
-          gcloud storage cp gs://$GCS_BUCKET/geocoding/links-soma-geocoding.zip downloads/geocoding/
-          gcloud storage cp gs://$GCS_BUCKET/conv/links-soma-conv.zip downloads/conv/
+          # Download region-specific soma data
+          gcloud storage cp gs://$GCS_BUCKET/build/${{ matrix.region }}/links-soma.zip downloads/soma/${{ matrix.region }}/links-soma.zip || echo "Could not download soma data for ${{ matrix.region }}"
 
-      - name: Create region-specific zip files
+          # Download common files
+          gcloud storage cp gs://$GCS_BUCKET/build/geocoding/links-soma-geocoding.zip downloads/geocoding/links-soma-geocoding.zip
+          gcloud storage cp gs://$GCS_BUCKET/build/converter/links-soma-converter.zip downloads/converter/links-soma-converter.zip
+
+      - name: Create zip file for region ${{ matrix.region }}
         run: |
           mkdir -p region_zips
-          for REGION in $(echo "$REGIONS" | sed 's/- //g'); do
-            mkdir -p temp/$REGION
-            # Extract region-specific soma data
-            unzip -q downloads/soma/$REGION-links-soma.zip -d temp/$REGION/soma
-            # Extract common geocoding data
-            unzip -q downloads/geocoding/links-soma-geocoding.zip -d temp/$REGION/geocoding
-            # Extract common conv data
-            unzip -q downloads/conv/links-soma-conv.zip -d temp/$REGION/conv
-            # Create combined zip for this region
-            (cd temp/$REGION && zip -r ../../../region_zips/$REGION-combined.zip .)
-          done
+          mkdir -p temp/${{ matrix.region }}
 
-      - name: Upload region zip files as artifacts
+          # Check if region-specific soma file exists
+          if [ -f "downloads/soma/${{ matrix.region }}/links-soma.zip" ]; then
+            # Extract region-specific soma data
+            unzip -q downloads/soma/${{ matrix.region }}/links-soma.zip -d temp/${{ matrix.region }}/soma
+          else
+            echo "Warning: downloads/soma/${{ matrix.region }}/links-soma.zip not found"
+            mkdir -p temp/${{ matrix.region }}/soma
+          fi
+
+          # Check if geocoding file exists
+          if [ -f "downloads/geocoding/links-soma-geocoding.zip" ]; then
+            # Extract common geocoding data
+            unzip -q downloads/geocoding/links-soma-geocoding.zip -d temp/${{ matrix.region }}/geocoding
+          else
+            echo "Warning: downloads/geocoding/links-soma-geocoding.zip not found"
+            mkdir -p temp/${{ matrix.region }}/geocoding
+          fi
+
+          # Check if converter file exists
+          if [ -f "downloads/converter/links-soma-converter.zip" ]; then
+            # Extract common conv data
+            unzip -q downloads/converter/links-soma-converter.zip -d temp/${{ matrix.region }}/converter
+          else
+            echo "Warning: downloads/converter/links-soma-converter.zip not found"
+            mkdir -p temp/${{ matrix.region }}/converter
+          fi
+
+          # Create zip for this region
+          (cd temp/${{ matrix.region }} && zip -r ../../region_zips/${{ matrix.region }}.zip . || echo "Error creating zip for ${{ matrix.region }}")
+
+      - name: Upload region zip to GCS
+        run: |
+          if [ -f "region_zips/${{ matrix.region }}.zip" ]; then
+            gsutil cp region_zips/${{ matrix.region }}.zip gs://$GCS_BUCKET/combined/${{ matrix.region }}.zip
+          else
+            echo "Warning: region_zips/${{ matrix.region }}.zip not found, skipping upload"
+            exit 1
+          fi
+
+      - name: Upload region zip as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: region-zip-files
-          path: region_zips/*.zip
+          name: ${{ matrix.region }}-zip
+          path: region_zips/${{ matrix.region }}.zip

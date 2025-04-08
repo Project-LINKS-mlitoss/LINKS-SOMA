@@ -101,16 +101,19 @@ export function MapComponent({
     [isMounted],
   );
 
+  /** 推定結果データの1行目のポリゴンの緯度経度を取得している */
   useEffect(
     function setMapCenterEffect() {
       if (!mapInstance) return;
       void (async () => {
+        // geometryの文字列を取得する
         const geometry = await getGeometry({
           unit,
           dataSetResultId,
           selectedDate,
           areas,
         });
+        // betterknownでgeometryをGeoJSONに変換する(緯度経度の表現)
         const center = await getCenter(geometry);
         mapInstance.setCenter(center || INITIAL_CENTER);
       })();

@@ -12,7 +12,29 @@ export const ROUTES = {
   ANALYSIS: {
     WORKBOOK: "/analysis/workbook",
     WORKBOOK_DETAIL: (id: string) => `/analysis/workbook/${id}`,
-    WORKBOOK_EDIT: (id: string) => `/analysis/workbook/${id}/edit`,
+    WORKBOOK_EDIT: ({
+      id,
+      queryParams,
+    }: {
+      id: string | number;
+      queryParams?: {
+        sheetId?: string | number | null;
+        viewId?: string | number | null;
+      };
+    }) => {
+      const query = new URLSearchParams();
+      const base = `/analysis/workbook/${id}/edit`;
+      if (!queryParams) {
+        return base;
+      }
+      if (queryParams.sheetId) {
+        query.set("sheetId", String(queryParams.sheetId));
+      }
+      if (queryParams.viewId) {
+        query.set("viewId", String(queryParams.viewId));
+      }
+      return `/analysis/workbook/${id}/edit?${query.toString()}`;
+    },
   },
   DATASET: "/dataset",
   MODEL: {

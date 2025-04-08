@@ -1,6 +1,6 @@
 {
   "name": "app",
-  "productName": "LINKS SOMA 空き家推定システム",
+  "productName": "LINKS SOMA",
   "description": "行政データと機械学習技術を用いた地域空き家推定システム",
   "author": "国土交通省総合政策局情報政策課",
   "version": "0.0.0",

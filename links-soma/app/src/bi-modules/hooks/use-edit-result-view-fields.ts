@@ -1,7 +1,6 @@
 import {
   useFieldArray,
   type UseFieldArrayReturn,
-  useForm,
   useFormContext,
   type UseFormReturn,
 } from "react-hook-form";
@@ -22,7 +21,6 @@ type ReturnType = {
   fieldArray: UseFieldArrayReturn<EditViewFormType>;
   handleStyleChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
   resetParametersByStyle: (style: SelectResultView["style"]) => void;
-  formGroupingResultView: UseFormReturn<{ parameters: Parameter[] }>;
 };
 
 /** @note useFormContextを内部で利用 */
@@ -30,7 +28,9 @@ export const useEditResultViewFields = ({
   dataSetResultId,
 }: Params): ReturnType => {
   const form = useFormContext<EditViewFormType>();
-  const { control, setValue, watch } = form;
+  const { control, setValue } = form;
+
+  /** 設定値パラメータを扱うためのフィールドステート */
   const fieldArray = useFieldArray({
     control,
     name: "parameters",
@@ -40,16 +40,6 @@ export const useEditResultViewFields = ({
 
   const { data: referenceDates } = useFetchReferenceDates({
     dataSetResultId,
-  });
-
-  const groupingFields = watch("parameters").filter((field) => {
-    return field.type === "group";
-  });
-
-  const formGroupingResultView = useForm<{ parameters: Parameter[] }>({
-    defaultValues: {
-      parameters: groupingFields,
-    },
   });
 
   const handleStyleChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
@@ -66,19 +56,15 @@ export const useEditResultViewFields = ({
         : TILE_VIEW_CONFIG[value].fields[0].option[0].unit;
     setValue("unit", unit);
 
-    formGroupingResultView.reset({ parameters: [] });
-
     switch (value) {
       case "line": {
         const parameters = createDefaultLineGroupParameters(referenceDates);
         setValue("parameters", [...defaultParameters, ...parameters]);
-        formGroupingResultView.reset({ parameters });
         return;
       }
       case "pie": {
         const parameters = createDefaultPieGroupParameters();
         setValue("parameters", [...defaultParameters, ...parameters]);
-        formGroupingResultView.reset({ parameters });
         return;
       }
       default:
@@ -94,7 +80,6 @@ export const useEditResultViewFields = ({
     resetParametersByStyle: (style) => {
       replace(createResetParametersByStyle(style));
     },
-    formGroupingResultView,
   };
 };
 

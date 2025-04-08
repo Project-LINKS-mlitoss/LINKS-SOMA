@@ -8,7 +8,7 @@ import {
 } from "@fluentui/react-components";
 import { useFetchJobsWithPagination } from "../hooks/use-fetch-jobs-with-pagination";
 import { type SelectJob } from "../schema";
-import { Pagination } from "../components/ui/pagination";
+import { Pagination } from "./ui/pagination";
 import { usePagination } from "../hooks/use-pagination";
 import { TableHeaderJobs } from "./table-header-jobs";
 import { TableRowJobs } from "./table-rows-jobs";

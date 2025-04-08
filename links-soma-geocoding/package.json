@@ -60,11 +60,13 @@
         "dmg",
         "zip"
       ],
-      "icon": "dist/icon.icns"
+      "icon": "dist/icon.icns",
+      "artifactName": "links-soma-geocoding.${ext}"
     },
     "win": {
       "target": "nsis",
-      "icon": "dist/icon.ico"
+      "icon": "dist/icon.ico",
+      "artifactName": "links-soma-geocoding.${ext}"
     },
     "linux": {
       "target": [

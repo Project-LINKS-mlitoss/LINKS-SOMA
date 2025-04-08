@@ -1,5 +1,5 @@
 {
-  "name": "LINKS SOMA 空き家推定システム",
+  "name": "LINKS SOMA",
   "private": true,
   "scripts": {
     "build": "turbo build",

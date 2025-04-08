@@ -3,6 +3,7 @@ import useSWR from "swr";
 import { Link } from "react-router-dom";
 import { formatDate } from "../utils/format-date";
 import { type SelectWorkbook } from "../schema";
+import { ROUTES } from "../routes";
 import { Table, type ColumnDefinition } from "./ui/table";
 
 const useStyles = makeStyles({
@@ -25,7 +26,7 @@ export const TableWorkbook = (): JSX.Element => {
       key: "title",
       name: "名前",
       onRender: (item) => (
-        <Link to={`/analysis/workbook/${item.id}`}>
+        <Link to={ROUTES.ANALYSIS.WORKBOOK_DETAIL(String(item.id))}>
           <FUILink
             as="span"
             style={{
