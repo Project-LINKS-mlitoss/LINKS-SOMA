@@ -1,4 +1,5 @@
 # サンプルデータはこちらからダウンロードが可能です
+LINKS SOMAの各操作を体験するためのデータです。東京都千代田区の住所をベースに、ダミーの空き家推定を実行することができます。詳細の操作方法は、LINKS SOMAの操作マニュアルを参照してください。
 
 [データをダウンロード](https://storage.googleapis.com/links-soma/example/data.zip)　（38MB）
 
