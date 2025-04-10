@@ -120,9 +120,12 @@ PLATEAU の CityGML → CityGML Converter で gpkg に変換
 
 ![image](https://github.com/user-attachments/assets/c5cc2641-e226-4fff-8f72-532c20cd59e0)
 
-###サンプルデータについて
-本システムの操作を体験できるサンプルデータを公開しています。こちらの[サンプルデータページ](https://github.com/Project-LINKS-mlitoss/LINKS-SOMA/tree/main/example/data)からダウンロードしてください。
-サンプルデータをインプットデータとして本システムの一連の動作を確認することができます。なお、このサンプルデータはダミーデータとなり、実際の建物情報とは一切関係ありません。
+### サンプルデータについて
+本システムの操作を体験できるサンプルデータを公開しています。
+こちらの[サンプルデータページ](https://github.com/Project-LINKS-mlitoss/LINKS-SOMA/tree/main/example/data)からダウンロードしてください。
+
+サンプルデータをインプットデータとして本システムの一連の動作を確認することができます。
+なお、このサンプルデータはダミーデータとなり、実際の建物情報とは一切関係ありません。
 
 ## 7. 関連ツール
 
