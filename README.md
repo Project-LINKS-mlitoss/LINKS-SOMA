@@ -141,21 +141,19 @@ PLATEAU の CityGML → CityGML Converter で gpkg に変換
 
 ```
 LINKS-SOMA/
-├── citygml*converter/
-│ └── (CityGMLコンバータ関連のソースや実行ファイル)
-├── geocoding_tool/
-│ └── (ジオコーディングツール関連のソースや実行ファイル)
-├── src/
-│ └── (本システムのソースコード)
 ├── docs/
-│ ├── 【公開版】LINKS_SOMA*空き家推定システムマニュアル.pdf
+│ ├── 【公開版】LINKS_SOMA_空き家推定システムマニュアル.pdf
 │ └── (その他のドキュメント)
 ├── examples/
 │ └── data/
 │   └── (サンプルデータ)
-│ └── models/
-│   └── (学習済みモデルデータ)
-├── LICENSE
+├── links-soma-citygml-conv/
+│ └── (CityGMLコンバータ関連のソースや実行ファイル)
+├── links-soma-geocoding_tool/
+│ └── (ジオコーディングツール関連のソースや実行ファイル)
+├── links-soma/
+│ └── (本システムのソースコード)
+├── LICENSE.md
 └── README.md
 ```
 
