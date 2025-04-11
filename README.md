@@ -1,3 +1,5 @@
+![image](./docs/images/main.png)
+
 # LINKS SOMA 空き家推定システム
 
 ## 0. 目次
