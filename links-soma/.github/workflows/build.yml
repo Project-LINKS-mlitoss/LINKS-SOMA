@@ -16,6 +16,7 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 120
 
     strategy:
       matrix:
@@ -76,6 +77,11 @@ jobs:
 
       - name: Build App
         working-directory: ./app
+        env:
+          VITE_GIT_COMMIT_HASH: ${{ github.sha }}
+          VITE_GIT_BRANCH: ${{ github.ref_name }}
+          VITE_BUILD_ENV: "github-actions"
+          VITE_WORKFLOW_RUN: ${{ github.run_number }}
         run: npm run make
 
       - name: Package ZIP

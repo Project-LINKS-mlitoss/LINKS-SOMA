@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+abr-data/
+test-results/
+.env
 
 # Editor directories and files
 .vscode/*

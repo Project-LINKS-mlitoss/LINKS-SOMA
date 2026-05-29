@@ -1,0 +1,1 @@
+ALTER TABLE `data_set_results` ADD `job_id` integer REFERENCES jobs(id);

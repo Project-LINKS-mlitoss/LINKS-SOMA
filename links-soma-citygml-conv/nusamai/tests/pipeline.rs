@@ -5,7 +5,7 @@ use nusamai::{
     pipeline::{self, Feedback, Parcel, Receiver, Result, Sender},
     sink::{DataRequirements, DataSink, DataSinkProvider, SinkInfo},
     source::{DataSource, DataSourceProvider, SourceInfo},
-    transformer::{Transformer, TransformerRegistry},
+    transformer::{Transformer, TransformerSettings},
 };
 use nusamai_citygml::schema::Schema;
 use nusamai_plateau::Entity;
@@ -40,10 +40,11 @@ impl DataSource for DummySource {
     }
 
     fn run(&mut self, sink: Sender, feedback: &Feedback) -> Result<()> {
+        let mut rng = rand::rng();
         for _i in 0..100 {
             feedback.ensure_not_canceled()?;
             std::thread::sleep(std::time::Duration::from_millis(
-                (5.0 + random::<f32>() * 10.0) as u64,
+                (5.0 + rng.random::<f32>() * 10.0) as u64,
             ));
             let obj = Parcel {
                 entity: Entity {
@@ -94,8 +95,8 @@ impl DataSinkProvider for DummySinkProvider {
         Parameters::default()
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let options: TransformerRegistry = TransformerRegistry::new();
+    fn transformer_options(&self) -> TransformerSettings {
+        let options: TransformerSettings = TransformerSettings::new();
         options
     }
 }
@@ -104,11 +105,12 @@ struct DummySink {}
 
 impl DataSink for DummySink {
     fn run(&mut self, upstream: Receiver, feedback: &Feedback, _schema: &Schema) -> Result<()> {
+        let mut rng = rand::rng();
         for parcel in upstream {
             feedback.ensure_not_canceled()?;
 
             std::thread::sleep(std::time::Duration::from_millis(
-                (5.0 + random::<f32>() * 20.0) as u64,
+                (5.0 + rng.random::<f32>() * 20.0) as u64,
             ));
             feedback.info(format!("dummy sink received: {:?}", parcel))
         }
@@ -116,7 +118,7 @@ impl DataSink for DummySink {
         Ok(())
     }
 
-    fn make_requirements(&mut self, _: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, _: TransformerSettings) -> DataRequirements {
         DataRequirements {
             ..Default::default()
         }

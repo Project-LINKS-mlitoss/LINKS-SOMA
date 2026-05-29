@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LINKS SOMA — 庁内データとAIで空き家を「見える化」</title>
+<meta name="description" content="LINKS SOMAは、国土交通省「Project LINKS」の一環として開発された、庁内データとAIで空き家を「見える化」するデスクトップアプリケーションです。">
+<link rel="icon" href="assets/logo.png" type="image/png">
+<link rel="preload" as="font" type="font/woff2" href="assets/fonts/NotoSansJP-subset-Regular.woff2" crossorigin>
+<link rel="preload" as="font" type="font/woff2" href="assets/fonts/NotoSansJP-subset-Bold.woff2" crossorigin>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="brand" href="#top">
+      <img src="assets/logo.png" alt="LINKS SOMA" class="brand-logo">
+      <span class="brand-name">LINKS <strong>SOMA</strong></span>
+    </a>
+    <nav class="site-nav">
+      <a href="#problem">課題</a>
+      <a href="#solution">特徴</a>
+      <a href="#how">使い方</a>
+      <a href="#proof">実証結果</a>
+      <a href="https://forms.gle/zcwF7rKg2aeZ34im7" class="nav-cta" target="_blank" rel="noopener">説明会に申し込む</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+<section class="hero">
+  <div class="container hero-inner">
+    <p class="hero-eyebrow">国土交通省「Project LINKS」</p>
+    <h1 class="hero-title">庁内データとAIで<br>空き家を「見える化」</h1>
+    <p class="hero-sub">LINKS SOMAは、行政データと機械学習で空き家を推定する<br>デスクトップアプリケーションです。<strong>システム費用負担なし・庁内完結・専門知識不要。</strong></p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="https://forms.gle/zcwF7rKg2aeZ34im7" target="_blank" rel="noopener">令和8年度 実証説明会に申し込む</a>
+      <a class="btn btn-secondary" href="#solution">SOMAでできることを見る</a>
+      <div class="hero-cta-tertiary-row">
+        <a class="hero-cta-tertiary" href="https://github.com/Project-LINKS-mlitoss/LINKS-SOMA/" target="_blank" rel="noopener" aria-label="令和6年度版SOMA を GitHub からダウンロードして使ってみる（新しいタブで開く）">
+          <svg class="gh-icon" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span class="cta-text">
+            <span class="cta-main">令和6年度版SOMA を使ってみる<span class="ext-mark" aria-hidden="true">↗</span></span>
+            <span class="cta-meta">GitHubからダウンロード</span>
+          </span>
+        </a>
+      </div>
+      <p class="hero-cta-note"><small>※令和7年度版は現在公開準備中です</small></p>
+    </div>
+    <div class="hero-visual">
+      <picture>
+        <source srcset="assets/screenshots/soma-workbook-overview.webp" type="image/webp">
+        <img src="assets/screenshots/soma-workbook-overview.png" alt="LINKS SOMA の空き家推定ワークブック画面。地図上に推定結果がプロットされ、下部に地域別の推定確率テーブルが表示されている。">
+      </picture>
+    </div>
+  </div>
+</section>
+
+<section id="problem" class="section section-problem">
+  <div class="container">
+    <p class="section-eyebrow">本事業の背景</p>
+    <h2 class="section-title">空き家対策の現場が抱える3つの課題</h2>
+    <p class="section-lead">空家特措法に基づき、市区町村は空き家の実態把握や対策計画の策定が求められています。<br>しかし限られた体制の中で、多くの自治体は次の課題を抱えています。</p>
+    <div class="cards cards-3">
+      <article class="card">
+        <div class="card-num">01</div>
+        <h3>調査コストが高い</h3>
+        <p>空き家の実態調査は <strong>5〜10年に一度</strong>、費用は <strong>数百万〜1,000万円超</strong>。外部データの購入だけで100万円を超えるケースもあり、限られた予算のなかで調査の頻度を上げることは容易ではありません。</p>
+      </article>
+      <article class="card">
+        <div class="card-num">02</div>
+        <h3>問題が起きてからの対応で手一杯</h3>
+        <p>担当職員の業務時間の <strong>6〜7割</strong> が、問題化した空き家の通報・相談対応に費やされ、早期発見や予防的な対策に手が回らないのが実情です。</p>
+      </article>
+      <article class="card">
+        <div class="card-num">03</div>
+        <h3>調査と調査の間の「空白期間」が長い</h3>
+        <p>次の実態調査まで <strong>5〜10年</strong>。その間に空き家は増減し状態も変わりますが、定期的なモニタリング体制を構築できている自治体は少ない状況です。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="solution" class="section section-solution">
+  <div class="container">
+    <p class="section-eyebrow">LINKS SOMAでできること</p>
+    <h2 class="section-title">既存の空き家推定手法との5つの違い</h2>
+    <p class="section-lead">外部事業者・研究機関への委託や民間企業のデータ購入と比較して、LINKS SOMAには次の特徴があります。</p>
+    <div class="features">
+      <article class="feature">
+        <h3>システム費用負担なし</h3>
+        <p>国土交通省がオープンソースとして公開、ライセンス費用はかかりません。候補リスト作成の内製化により、外部データ購入費の削減にもつながります。<small>※必要に応じて、有償ジオコーダーやデータを組み合わせて利用することもできます。</small></p>
+      </article>
+      <article class="feature">
+        <h3>庁内完結・データ持ち出しなし</h3>
+        <p>推定処理から分析・出力まで庁内の端末で完結します。外部事業者への委託や、外部サーバーへのデータ送信は不要です。必要なときに自分たちのペースで推定を実行できます。<small>※任意に利用するジオコーディングツールを除く。</small></p>
+      </article>
+      <article class="feature">
+        <h3>専門知識がいらない</h3>
+        <p>AIやエンジニアの専門スキルは不要。令和6・7年度の自治体職員による実証でUI改善を重ねています。<small>※令和7年度の実証では、初めて触った職員の94%が「概ね自力で操作できた」と回答。</small></p>
+      </article>
+      <article class="feature">
+        <h3>手持ちのデータだけで始められる</h3>
+        <p>まずは <strong>水道使用量データと住民基本台帳</strong> だけで推定を開始できます。</p>
+      </article>
+      <article class="feature">
+        <h3>空き家対策以外の業務にも活かせる</h3>
+        <p>令和7年度の実証ワークショップでは、<strong>高齢者福祉</strong>（見守り対象把握）、<strong>防災</strong>（危険家屋特定）、<strong>都市計画</strong>（区画整理検討）など6領域以上で活用場面が自発的に提案されました。</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="how" class="section section-how">
+  <div class="container">
+    <p class="section-eyebrow">5つのステップ</p>
+    <h2 class="section-title">データ取り込みから繰り返し推定まで</h2>
+    <ol class="steps-narrative">
+      <li class="step-row">
+        <figure class="step-visual">
+          <span class="step-badge">1</span>
+          <picture>
+            <source srcset="assets/screenshots/step-1-data-import.webp" type="image/webp">
+            <img src="assets/screenshots/step-1-data-import.png" alt="LINKS SOMA の名寄せ処理ウィザード画面。水道閉開栓状況データセットの選択ダイアログが表示され、水道開閉栓状況.csv が選択された状態。">
+          </picture>
+        </figure>
+        <div class="step-text">
+          <p class="step-label">STEP 1</p>
+          <h3>データ読込・統合</h3>
+          <p>水道使用量・住基台帳等を取り込み、住所を正規化して建物単位で突合します。</p>
+        </div>
+      </li>
+      <li class="step-row">
+        <figure class="step-visual">
+          <span class="step-badge">2</span>
+          <picture>
+            <source srcset="assets/screenshots/step-2-model-result.webp" type="image/webp">
+            <img src="assets/screenshots/step-2-model-result.png" alt="LINKS SOMA の処理結果画面。空き家推定モデルの構築完了状態で、Precision@K・Lift・判定ライン・特徴量重要度ランキングが表示されている。">
+          </picture>
+        </figure>
+        <div class="step-text">
+          <p class="step-label">STEP 2</p>
+          <h3>AIが空き家確率を推定</h3>
+          <p>複数指標を総合し、水道が開栓状態のまま等、目視で見つけにくい空き家候補も数値化します。</p>
+        </div>
+      </li>
+      <li class="step-row">
+        <figure class="step-visual">
+          <span class="step-badge">3</span>
+          <picture>
+            <source srcset="assets/screenshots/step-3-workbook-map.webp" type="image/webp">
+            <img src="assets/screenshots/step-3-workbook-map.png" alt="LINKS SOMA の空き家推定ワークブック編集画面。地図上に推定確率で色分けされた建物がプロットされ、ポップアップで世帯・水道・登記情報を確認でき、右側には住所別の推定確率テーブルが並ぶ。">
+          </picture>
+        </figure>
+        <div class="step-text">
+          <p class="step-label">STEP 3</p>
+          <h3>地図・グラフで可視化</h3>
+          <p>エリア・建物単位で空き家の集中度を一目で把握できます。</p>
+        </div>
+      </li>
+      <li class="step-row">
+        <figure class="step-visual">
+          <span class="step-badge">4</span>
+          <picture>
+            <source srcset="assets/screenshots/step-4-export.webp" type="image/webp">
+            <img src="assets/screenshots/step-4-export.png" alt="LINKS SOMA の調査対象リスト出力ダイアログ。出力ファイル形式 (CSV) と出力座標系 (EPSG:4326 WGS84) を選択する画面が、推定確率付きの建物一覧テーブルの上に表示されている。">
+          </picture>
+        </figure>
+        <div class="step-text">
+          <p class="step-label">STEP 4</p>
+          <h3>調査対象リスト出力</h3>
+          <p>可能性の高い順にCSV/GeoJSONで出力。GISツールと連携可能です。</p>
+        </div>
+      </li>
+      <li class="step-row">
+        <figure class="step-visual">
+          <span class="step-badge">5</span>
+          <picture>
+            <source srcset="assets/screenshots/step-5-history.webp" type="image/webp">
+            <img src="assets/screenshots/step-5-history.png" alt="LINKS SOMA の処理一覧画面。名寄せ処理・モデル構築・空き家推定の過去ジョブが時系列で並び、それぞれ処理ステータスと保存ステータスが表示されている。">
+          </picture>
+        </figure>
+        <div class="step-text">
+          <p class="step-label">STEP 5</p>
+          <h3>いつでも繰り返し推定</h3>
+          <p>データ更新のたびに再推定。大規模調査を待たず状態変化を追跡できます。</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section id="spec" class="section section-spec">
+  <div class="container">
+    <h2 class="section-title">動作環境・利用料</h2>
+    <dl class="spec-list">
+      <div>
+        <dt>対象ユーザー</dt>
+        <dd>空き家対策担当職員（専門スキル不要）</dd>
+      </div>
+      <div>
+        <dt>使用データ</dt>
+        <dd>水道使用量・住基台帳 等（庁内で保有する行政データ）</dd>
+      </div>
+      <div>
+        <dt>動作環境</dt>
+        <dd>手元のPCで完結（Windows 11 / Core i3 第10世代 / 8GB以上推奨、LGWAN接続系環境での利用可）</dd>
+      </div>
+      <div>
+        <dt>システム利用料</dt>
+        <dd><strong>システム利用に係る費用は発生いたしません（OSS）</strong>　Webページからダウンロード可能</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section id="proof" class="section section-proof">
+  <div class="container">
+    <p class="section-eyebrow">令和7年度 実証結果</p>
+    <h2 class="section-title">5自治体52名の職員が実際に体験</h2>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num">94<span class="stat-unit">%</span></div>
+        <div class="stat-label">「概ね自力で操作できた」</div>
+        <p>SOMAを触った職員52名のうち、94%が自力で基本操作を完了</p>
+      </div>
+      <div class="stat">
+        <div class="stat-num">83<span class="stat-unit">%</span></div>
+        <div class="stat-label">「SOMAは有用」と評価</div>
+        <p>空き家対策のツールとして有用であると83%が回答</p>
+      </div>
+      <div class="stat">
+        <div class="stat-num">81<span class="stat-unit">%</span></div>
+        <div class="stat-label">「データ起点の施策検討に前向き」</div>
+        <p>推定データを活用した施策立案を自分の業務でも実践したいと81%が回答</p>
+      </div>
+    </div>
+    <ul class="voice-list">
+      <li class="voice">
+        <span class="voice-avatar" aria-hidden="true"><img src="assets/icons/person-bust.svg" alt=""></span>
+        <blockquote class="voice-bubble"><p>土地区画整理事業検討エリアにおいて、土地区画整理事業によらないまちづくりを選択した場合に、空き家の建物や土地などを利用した施策を検討できるのではないかと思います。</p></blockquote>
+      </li>
+      <li class="voice">
+        <span class="voice-avatar" aria-hidden="true"><img src="assets/icons/person-bust.svg" alt=""></span>
+        <blockquote class="voice-bubble"><p>SOMAの全国展開によって、こうしたAIを活用したEBPMが「当たり前」の世界になり、また、そのアウトプットを保有データと重ね合わせて分析していくことも「当たり前」の世界になっていけば、本市の統合型GIS（せっかくSOMAがあるのにそれを十分に利活用できる環境がない）をどう整備していく必要があるか？という課題に対しても、予算要求上でも、１つの後押しになり得ると感じました。また、この「当たり前の世界」は、SOMAに必要な内部情報の提供もスムースに行うための後押しにもなり得ると感じました。</p></blockquote>
+      </li>
+      <li class="voice">
+        <span class="voice-avatar" aria-hidden="true"><img src="assets/icons/person-bust.svg" alt=""></span>
+        <blockquote class="voice-bubble"><p>グループワークの中で「高齢者一人暮らしの世帯は今後空き家になる可能性が高いため、集中的にアプローチしていく」という意見があり、様々なデータを統合しているからこそ空き家の予防的な対策も行えるのが面白いと感じた。自治体の業務ではこのように地図を活用することでより効率的になるものが多くあると感じるため、今後多様な業務に広まっていくべきだと思う。</p></blockquote>
+      </li>
+      <li class="voice">
+        <span class="voice-avatar" aria-hidden="true"><img src="assets/icons/person-bust.svg" alt=""></span>
+        <blockquote class="voice-bubble"><p>今後空き家になりやすい住居や空き家が増えそうな地域の予測ができれば、効果的な啓発活動ができるのではないか。</p></blockquote>
+      </li>
+      <li class="voice">
+        <span class="voice-avatar" aria-hidden="true"><img src="assets/icons/person-bust.svg" alt=""></span>
+        <blockquote class="voice-bubble"><p>今までできなかった全戸調査の元資料として、また空家定点観測としても資料として活用したい。</p></blockquote>
+      </li>
+    </ul>
+    <div class="proof-insights">
+      <h3>実証実験で見えてきたこと</h3>
+      <ul>
+        <li><strong>候補リスト作成の内製化・コスト削減の可能性</strong>　ヒアリングした5自治体中4自治体が、現状は候補リストを外部データ購入または委託で作成。SOMAで代替できれば、この工程を庁内で内製化しコストを削減できる可能性。</li>
+        <li><strong>5〜10年ある「調査間隔の空白」を補う手段になり得る</strong>　SOMAが使う行政データ（水道使用量等）は定期更新。大規模な実態調査がない年度も、再推定するだけで状況変化を追跡可能。</li>
+        <li><strong>空き家対策以外にも広がるデータ活用の可能性</strong>　令和7年度ワークショップ後のアンケートで、福祉・防災・都市計画など、空き家対策の直接担当以外の領域からも活用案が挙がった。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="join" class="section section-join">
+  <div class="container">
+    <p class="section-eyebrow">令和8年度 実証事業への参加</p>
+    <h2 class="section-title">最新版のSOMAを試せる自治体を募集します</h2>
+    <p class="section-lead">データドリブンな空き家対策の裾野を広げるため、最新版のSOMAを用いた実証へ参加・ご協力いただける自治体を募集します。<br>実証への参加を通じて、SOMAの操作とデータ加工や名寄せ処理、空き家推定等の基礎を理解し、推定結果を用いた運用を試行していただけます。<br>これまでの実証で培ったノウハウをもとに、導入から活用まで丁寧にサポートいたします。</p>
+    <div class="cards cards-3 join-cards">
+      <article class="card join-card">
+        <div class="join-tier">参加区分①</div>
+        <h3>総合実証</h3>
+        <p class="join-quota">4団体程度</p>
+        <p class="join-cooperation-label">ご協力いただく内容</p>
+        <ul>
+          <li>庁内データの取り寄せ</li>
+          <li>SOMAでの空き家推定実行（受託事業者の個別フォロー有）</li>
+          <li>オンライン講習会</li>
+          <li>対面の庁内ワークショップ1回</li>
+          <li>有用性評価への協力</li>
+          <li>SOMAを使った業務フローの検討・実践、現地調査試行</li>
+        </ul>
+      </article>
+      <article class="card join-card">
+        <div class="join-tier">参加区分②</div>
+        <h3>体験実証</h3>
+        <p class="join-quota">8団体程度</p>
+        <p class="join-cooperation-label">ご協力いただく内容</p>
+        <ul>
+          <li>SOMAでの空き家推定実行（受託事業者の個別フォロー有）</li>
+          <li>オンライン講習会</li>
+          <li>対面の庁内ワークショップ1回</li>
+          <li>有用性評価への協力</li>
+        </ul>
+      </article>
+      <article class="card join-card">
+        <div class="join-tier">参加区分③</div>
+        <h3>オンライン講習会参加</h3>
+        <p class="join-quota">適宜</p>
+        <p class="join-cooperation-label">ご協力いただく内容</p>
+        <ul>
+          <li>SOMAでの空き家推定実行</li>
+          <li>オンライン講習会</li>
+          <li>講習用資料への有用性評価</li>
+        </ul>
+      </article>
+    </div>
+    <h3 class="schedule-title">スケジュール（令和8年度）</h3>
+    <div class="schedule">
+      <div class="schedule-row">
+        <div class="schedule-period">4〜6月</div>
+        <div class="schedule-task">事前ヒアリング、データ取得</div>
+      </div>
+      <div class="schedule-row">
+        <div class="schedule-period">7〜9月</div>
+        <div class="schedule-task">オンライン講習参加 / 庁内データ加工・SOMAによる推定実行</div>
+      </div>
+      <div class="schedule-row">
+        <div class="schedule-period">10〜12月</div>
+        <div class="schedule-task">推定結果分析、施策検討ワークショップの実施 / 業務フロー検討、現地調査試行</div>
+      </div>
+      <div class="schedule-row">
+        <div class="schedule-period">1〜3月</div>
+        <div class="schedule-task">受託事業者にて成果を取りまとめ、必要に応じて報告書の公開前確認</div>
+      </div>
+    </div>
+    <p class="schedule-note"><small>※ 参加区分、実証内容、スケジュールは予定であり、事業の進捗状況等によって変更となる可能性があります。<br>※ 名寄せ処理: SOMAにおける処理の名称。複数データを住所キー等で突合し、同一建物のデータとして統合する処理。</small></p>
+  </div>
+</section>
+
+<section id="contact" class="section section-contact">
+  <div class="container">
+    <h2 class="section-title">お問い合わせ</h2>
+
+    <div class="contact-main">
+      <h3 class="contact-main-title">実証説明会のお申し込み</h3>
+      <p class="contact-main-lead">実証参加にご関心のある自治体は、まず説明会へお申し込みください。</p>
+      <p class="contact-cta-wrap">
+        <a class="contact-cta-link" href="https://forms.gle/zcwF7rKg2aeZ34im7" target="_blank" rel="noopener">令和8年度 実証説明会に申し込む</a>
+      </p>
+    </div>
+
+    <div class="contact-sub">
+      <h3 class="contact-sub-title">個別のご相談・お問い合わせ</h3>
+      <p>個別のご相談・お問い合わせは、下記メールアドレスまでご連絡ください。</p>
+      <div class="contact-info">
+        <div>
+          <dt>事業名</dt>
+          <dd>2026年度 Project LINKS「国土交通分野のデータ整備・活用・オープンデータ化（Project LINKS）の推進に向けた行政情報を活用した空き家推定技術の実証調査」</dd>
+        </div>
+        <div>
+          <dt>受託事業者</dt>
+          <dd>株式会社Eukarya</dd>
+        </div>
+        <div>
+          <dt>メールアドレス</dt>
+          <dd><a href="mailto:links-soma@eukarya.io">links-soma@eukarya.io</a></dd>
+        </div>
+      </div>
+    </div>
+
+    <aside class="aux-cta" aria-labelledby="aux-cta-title">
+      <h3 id="aux-cta-title" class="aux-cta-title">コード・ドキュメント</h3>
+      <p class="aux-cta-desc">ソースコードと開発状況は GitHub で公開しています。ご自身で SOMA を試したい方は、こちらからご覧いただけます。</p>
+      <a class="aux-cta-link" href="https://github.com/Project-LINKS-mlitoss/LINKS-SOMA/" target="_blank" rel="noopener" aria-label="GitHub リポジトリを開く (新しいタブ)">
+        <span>GitHub リポジトリを開く</span>
+        <span class="aux-arrow" aria-hidden="true">&rarr;</span>
+      </a>
+    </aside>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    <p>© Project LINKS — LINKS SOMA</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,9 +1,12 @@
 import os
 import sys
+import sqlite3
+import pandas as pd
 import geopandas as gpd
 from shapely import wkt
 from shapely.geometry import MultiPolygon, Polygon
 import json
+import numpy as np
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 async_tasks_path = os.path.join(current_dir, '..', 'async_tasks')
@@ -34,49 +37,197 @@ def remove_z_coordinate(geometry):
     else:
         return geometry
 
-def read_input_data(data_set_results_id, reference_date, table_name):
+def _init_gpkg(output_path):
+    """
+    空のGeoPackageファイルを初期化する（OGC必須メタデータテーブルを作成）。
+    全行NULLジオメトリの場合にgeopandasのto_file()が呼ばれないため、
+    attributesレイヤー書き込み前にGeoPackageの骨格を用意する。
+    """
+    conn = sqlite3.connect(output_path)
     try:
-        df = get_data_set_detail_buildings_or_area(data_set_results_id, reference_date, table_name)
-        
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gpkg_spatial_ref_sys (
+                srs_name TEXT NOT NULL,
+                srs_id INTEGER NOT NULL PRIMARY KEY,
+                organization TEXT NOT NULL,
+                organization_coordsys_id INTEGER NOT NULL,
+                definition TEXT NOT NULL,
+                description TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO gpkg_spatial_ref_sys
+            (srs_name, srs_id, organization, organization_coordsys_id, definition)
+            VALUES ('WGS 84', 4326, 'EPSG', 4326,
+                    'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]')
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gpkg_contents (
+                table_name TEXT NOT NULL PRIMARY KEY,
+                data_type TEXT NOT NULL,
+                identifier TEXT UNIQUE,
+                description TEXT DEFAULT '',
+                last_change DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                min_x DOUBLE,
+                min_y DOUBLE,
+                max_x DOUBLE,
+                max_y DOUBLE,
+                srs_id INTEGER,
+                CONSTRAINT fk_gc_r_srs_id FOREIGN KEY (srs_id) REFERENCES gpkg_spatial_ref_sys(srs_id)
+            )
+        """)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _write_attributes_layer_to_gpkg(df, output_path, layer_name='attributes'):
+    """
+    NULLジオメトリのレコードをGeoPackageの非空間テーブルとして書き込む。
+    OGC GeoPackage 1.2+ の data_type='attributes' に準拠。
+    """
+    if not os.path.exists(output_path):
+        _init_gpkg(output_path)
+
+    conn = sqlite3.connect(output_path)
+    try:
+        # ジオメトリカラムを除外してDataFrameとして書き込み
+        df_attrs = df.drop(columns=['geometry'], errors='ignore')
+        df_attrs['fid'] = range(1, len(df_attrs) + 1)
+        df_attrs.to_sql(layer_name, conn, if_exists='replace', index=False)
+
+        # gpkg_contents にレイヤーを登録（data_type='attributes'）
+        conn.execute("""
+            INSERT OR REPLACE INTO gpkg_contents
+            (table_name, data_type, identifier, description, last_change, srs_id)
+            VALUES (?, 'attributes', ?, '', datetime('now'), 4326)
+        """, (layer_name, layer_name))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _decode_bytes_columns(gdf):
+    """
+    bytes型カラムをstr(UTF-8)に変換する。
+    PyInstaller環境ではpyogrioが利用できずfionaにフォールバックするが、
+    fiona 1.9.6はbytes型カラムを扱えない（ValueError: Invalid field type <class 'bytes'>）。
+    """
+    for col in gdf.select_dtypes(include=["object"]).columns:
+        if col != "geometry":
+            gdf[col] = gdf[col].apply(
+                lambda x: x.decode("utf-8") if isinstance(x, bytes) else x
+            )
+    return gdf
+
+
+def read_input_data(result_views):
+    try:
+        df, columns_name, threshold = get_data_set_detail_buildings_or_area(result_views)
+
         if df is None:
             raise Exception("No data found")
-        if 'geometry' not in df.columns:
-            raise ValueError("'geometry' column is missing in the input data")
+        geometry = 'bldg_geometry'
+        if 'bldg_geometry' not in df.columns:
+            geometry = 'geometry'
+            if 'geometry' not in df.columns:
+                raise ValueError("'geometry' column is missing in the input data")
+        if result_views.get('unit') == 'building':
+            if threshold is not None:
+                threshold = int(threshold.get('value'))
+                if "predicted_label" in df.columns:
+                    df["predicted_label"] = df[f"predicted_label_{threshold:02d}"]
 
-        df['geometry'] = df['geometry'].apply(wkt.loads)
-        df['geometry'] = df['geometry'].apply(remove_z_coordinate)
+            # Drop all predicted_label_XX columns
+            columns_to_drop = [
+                f"predicted_label_{threshold_percent:02d}"
+                for threshold_percent in range(5, 96, 5)
+            ]
+            df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
+        else:
+            if threshold is not None:
+                threshold = int(threshold.get('value'))
+                if "vacant_house_count" in df.columns:
+                    df["vacant_house_count"] = df[f"vacant_house_count_{threshold:02d}"]
+                if "predicted_probability" in df.columns:
+                    df["predicted_probability"] = df[f"predicted_probability_{threshold:02d}"]
+            
+            # Drop all vacant_house_count_XX and predicted_probability_XX columns
+            columns_to_drop = [
+                f"vacant_house_count_{threshold_percent:02d}"
+                for threshold_percent in range(5, 96, 5)
+            ]
+            columns_to_drop.extend([
+                f"predicted_probability_{threshold_percent:02d}"
+                for threshold_percent in range(5, 96, 5)
+            ])
+            df.drop(columns=columns_to_drop, inplace=True, errors='ignore')
 
-        gdf = gpd.GeoDataFrame(df, geometry='geometry')
+        # Handle null values: convert only valid WKT strings
+        df[geometry] = df[geometry].apply(
+            lambda x: wkt.loads(x) if pd.notna(x) else None
+        )
+        # Remove Z coordinate, handle null geometries
+        df[geometry] = df[geometry].apply(
+            lambda x: remove_z_coordinate(x) if x is not None else None
+        )
+
+        gdf = gpd.GeoDataFrame(df, geometry=geometry)
 
         if gdf.crs is None:
             gdf.set_crs(epsg=4326, inplace=True)
 
-        return gdf
+        return gdf, columns_name
     except Exception as e:
         set_error(ERROR_30001)
-        raise
+        raise Exception(e)
 
-def rename_columns(gdf, ext, job_id=None, target_unit="building"):
+def rename_columns(gdf, ext, job_id=None, target_unit="building", columns_name=None):
     if target_unit == "building":
-        columns = TRANSLATE_COLUMNS_BUILDING
+        columns = COLUMNS_EXPORT_BUILDING_IF004
     else:
         columns = TRANSLATE_COLUMNS_AREA
 
     if ext != "csv":
         rename_dict = {col: columns[col] for col in gdf.columns if col in columns and col != "geometry"}
-        selected_columns = list(rename_dict.keys()) + (["geometry"] if "geometry" in gdf.columns else [])
+        if target_unit == "building":
+            selected_columns = list(rename_dict.keys()) + (["bldg_geometry"] if "bldg_geometry" in gdf.columns and "bldg_geometry" not in list(rename_dict.keys()) else [])
+        else:
+            selected_columns = list(rename_dict.keys()) + (["geometry"] if "geometry" in gdf.columns and "geometry" not in list(rename_dict.keys()) else [])
     else:
-        rename_dict = columns
+        rename_dict = {col: columns[col] for col in gdf.columns if col in columns}
         selected_columns = list(rename_dict.keys())
 
     gdf = gdf[selected_columns]
     gdf = gdf.rename(columns=rename_dict)
+
+    if ext == "csv":
+        if target_unit != "building":
+            # Reorder columns to match the order in the translation dictionary
+            translation_order = list(TRANSLATE_COLUMNS_AREA.values())
+        else:
+            translation_order = list(COLUMNS_EXPORT_BUILDING_IF004.values())
+
+        # Get the renamed columns that exist in our dataframe
+        existing_renamed_columns = [col for col in translation_order if col in gdf.columns]
+
+        # Reorder the dataframe columns
+        gdf = gdf[existing_renamed_columns]
+    else:
+        gdf = gdf.rename(columns={
+            "建物ポリゴンジオメトリ情報": "geometry"
+        })
+        # geopandasのrename()は_geometry_column_nameを更新しないため、
+        # set_geometry()でアクティブジオメトリカラムを再設定する
+        if "geometry" in gdf.columns:
+            gdf = gdf.set_geometry("geometry")
+
     if job_id:
         create_or_update_job(job_id, 60)
     return gdf
 
 
-def export_data(gdf, output_path, output_format, target_unit, job_id=None):
+def export_data(gdf, output_path, output_format, target_unit, job_id=None, columns_name=None):
     """
     データをエクスポートする関数
     """
@@ -84,7 +235,7 @@ def export_data(gdf, output_path, output_format, target_unit, job_id=None):
         if job_id:
             create_or_update_job(job_id, 50)
         if output_format.lower() == 'csv':
-            gdf = rename_columns(gdf, output_format.lower(), job_id, target_unit)
+            gdf = rename_columns(gdf, output_format.lower(), job_id, target_unit, columns_name)
             encodings = ['utf-8-sig']
             for encoding in encodings:
                 try:
@@ -94,12 +245,53 @@ def export_data(gdf, output_path, output_format, target_unit, job_id=None):
                     pass
             raise ValueError("Failed to export CSV with all attempted encodings.")
         elif output_format.lower() == 'geojson':
-            gdf = rename_columns(gdf, output_format.lower(), target_unit)
-            gdf.to_file(output_path, driver='GeoJSON')
+            # NULLジオメトリは geometry: null として出力（RFC 7946準拠）
+            gdf_renamed = rename_columns(
+                gdf, output_format.lower(), job_id, target_unit, columns_name
+            )
+            gdf_renamed = _decode_bytes_columns(gdf_renamed)
+            gdf_renamed.to_file(output_path, driver='GeoJSON')
         elif output_format.lower() == 'geopackage':
-            gdf = rename_columns(gdf, output_format.lower(), target_unit)
-            gdf['fid'] = range(1, len(gdf) + 1)
-            gdf.to_file(output_path, driver='GPKG')
+            gdf_renamed = rename_columns(
+                gdf, output_format.lower(), job_id, target_unit, columns_name
+            )
+            gdf_renamed = _decode_bytes_columns(gdf_renamed)
+
+            # ジオメトリの有無で分割
+            has_geom_mask = gdf_renamed.geometry.notnull()
+            gdf_spatial = gdf_renamed[has_geom_mask].copy()
+            gdf_null = gdf_renamed[~has_geom_mask].copy()
+
+            if target_unit == "building":
+                if not gdf_spatial.empty:
+                    # ジオメトリタイプ別にレイヤ分離
+                    geom_types = gdf_spatial["geometry"].geom_type
+
+                    # Point レイヤ
+                    point_mask = geom_types == 'Point'
+                    if point_mask.any():
+                        gdf_point = gdf_spatial[point_mask].copy()
+                        gdf_point['fid'] = range(1, len(gdf_point) + 1)
+                        gdf_point.to_file(output_path, layer='point', driver='GPKG')
+
+                    # Polygon レイヤ（Polygon + MultiPolygon）
+                    polygon_mask = geom_types.isin(['Polygon', 'MultiPolygon'])
+                    if polygon_mask.any():
+                        gdf_polygon = gdf_spatial[polygon_mask].copy()
+                        gdf_polygon['fid'] = range(1, len(gdf_polygon) + 1)
+                        # fiona 1.9.6 + GDAL 3.6.4 では mode='a' が NULL pointer error になる。
+                        # mode='w'（デフォルト）+ layer指定 で既存レイヤーを保持したまま新規レイヤーを追加できる。
+                        gdf_polygon.to_file(
+                            output_path, layer='polygon', driver='GPKG'
+                        )
+            else:
+                if not gdf_spatial.empty:
+                    gdf_spatial['fid'] = range(1, len(gdf_spatial) + 1)
+                    gdf_spatial.to_file(output_path, driver='GPKG')
+
+            # NULLジオメトリのレコードをattributesレイヤーに出力
+            if not gdf_null.empty:
+                _write_attributes_layer_to_gpkg(gdf_null, output_path)
         else:
             set_error(ERROR_30004)
             raise ValueError("CSV形式、GeoPackage形式、GeoJSON形式のファイルを指定してください。")
@@ -107,7 +299,7 @@ def export_data(gdf, output_path, output_format, target_unit, job_id=None):
     except Exception as e:
         if ERROR_CODE is None:
             set_error(ERROR_30002)
-        raise
+        raise Exception(e)
 
 def processing(params, job_id=None, db_path=None):
     """
@@ -116,21 +308,34 @@ def processing(params, job_id=None, db_path=None):
     try:
         if db_path:
             connect_sqllite(db_path)
-        data_set_results_id = params['data_set_results_id']
-        table_name = "data_set_detail_buildings"
-        target_unit = params['target_unit']
-        if (target_unit == 'area'):
-            table_name = 'data_set_detail_areas'
-            
         output_path = params['output_path']
         task_id = None
         if job_id:
             task_id = create_or_update_job_task(job_id, progress_percent="0", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}))
 
-        gdf = read_input_data(data_set_results_id, params.get("reference_date"), table_name)
+        view_id = params.get("view_id", None)
+        result_views = None
+        if view_id is not None:
+            result_views = get_data_result_views(view_id)
+            result_views = result_views.to_dict(orient='records')
+            if len(result_views):
+                result_views = result_views[0]
+        else:
+            result_views = {
+                "data_set_result_id": params.get("data_set_results_id", None),
+                "unit": params.get("target_unit", None),
+                "parameters": '[]',
+                "reference_date": params.get("reference_date", None)
+            }
+
         if job_id:
-            create_or_update_job_task(job_id, progress_percent="20", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
+            create_or_update_job_task(job_id, progress_percent="20", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id=task_id)
             create_or_update_job(job_id, 20)
+
+        gdf, columns_name = read_input_data(result_views)
+        if job_id:
+            create_or_update_job_task(job_id, progress_percent="30", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
+            create_or_update_job(job_id, 30)
         if params.get('target_crs'):
             target_crs = params['target_crs']
             if gdf.crs.to_string().upper() != target_crs.upper():
@@ -145,8 +350,8 @@ def processing(params, job_id=None, db_path=None):
         if job_id:
             create_or_update_job_task(job_id, progress_percent="40", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
             create_or_update_job(job_id, 40)
-        
-        output_file_path = export_data(gdf, output_path, params['output_format'], target_unit, job_id)
+        target_unit = result_views.get('unit', None)
+        output_file_path = export_data(gdf, output_path, params['output_format'], target_unit, job_id, columns_name)
 
         if job_id:
             create_or_update_job_task(job_id, progress_percent="100", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id, is_finish=True)
@@ -154,12 +359,13 @@ def processing(params, job_id=None, db_path=None):
             
         return output_file_path
     except Exception as e:
-        if ERROR_CODE is None:
-            set_error(ERROR_30003)
         if task_id is not None:
             create_or_update_job_task(job_id, progress_percent="", preprocess_type=None, error_code=ERROR_CODE, error_msg=ERROR_MSG, result=json.dumps({}), id= task_id, is_finish=True)
+        if ERROR_CODE is None:
+            set_error(ERROR_30003)
+            raise Exception("正しいCRS（参照座標系）になっているかご確認ください。")
 
-        raise Exception("変換処理中にエラーが発生しました。正しいCRS（参照座標系）になっているかご確認ください。")
+        raise Exception(e)
 
 def set_error(value, param_st1=None, param_st2=None):
     global ERROR_CODE

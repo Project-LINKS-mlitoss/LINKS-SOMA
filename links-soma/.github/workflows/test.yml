@@ -1,0 +1,85 @@
+name: Test (ml)
+
+on:
+  pull_request:
+    paths:
+      - 'ml/src/**'
+      - 'ml/tests/**'
+      - 'ml/pyproject.toml'
+      - 'ml/poetry.lock'
+      - '.github/workflows/test.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: test-ml-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ./ml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        run: pip install poetry==1.8.3
+
+      - name: Configure Poetry (in-project venv)
+        run: poetry config virtualenvs.in-project true
+
+      - name: Cache Poetry venv
+        uses: actions/cache@v4
+        with:
+          path: ml/.venv
+          key: poetry-${{ runner.os }}-py311-${{ hashFiles('ml/poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --no-root
+
+      - name: Run pytest with coverage
+        run: |
+          poetry run pytest tests/ \
+            --cov \
+            --cov-report=term \
+            --cov-report=json:coverage.json \
+            2>&1 | tee pytest-output.txt
+
+      - name: Build coverage summary
+        if: always()
+        run: |
+          if [ -f coverage.json ]; then
+            total=$(jq -r '.totals.percent_covered | (. * 10 | round) / 10' coverage.json)
+          else
+            total="N/A"
+          fi
+          {
+            echo "## pytest coverage: ${total}%"
+            echo ""
+            echo "<details><summary>pytest output (last 150 lines)</summary>"
+            echo ""
+            echo '```'
+            tail -n 150 pytest-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            echo ""
+            echo "</details>"
+          } > comment.md
+          cat comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post sticky coverage comment
+        if: always() && github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pytest-coverage
+          path: ml/comment.md

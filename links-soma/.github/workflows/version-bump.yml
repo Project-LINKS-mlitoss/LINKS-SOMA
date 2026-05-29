@@ -10,6 +10,7 @@ on:
 jobs:
   version-bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
 
@@ -47,6 +48,7 @@ jobs:
   trigger-build:
     needs: version-bump
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Trigger build workflow
         uses: actions/github-script@v7

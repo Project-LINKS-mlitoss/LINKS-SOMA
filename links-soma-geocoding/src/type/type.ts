@@ -11,7 +11,7 @@ export type ColumnLabels = (typeof columnLabels)[number];
 export type FormValues = {
   apiToken: string;
   datasetFile: FileList;
-  apiType: "aws" | "zenrin";
+  apiType: "aws" | "zenrin" | "ntt" | "abr";
   columns: {
     [key in ColumnLabels]: string;
   };

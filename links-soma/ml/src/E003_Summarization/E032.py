@@ -6,7 +6,10 @@
 
 import json
 import sys
+import traceback
+
 import pandas as pd
+import numpy as np
 import geopandas as gpd
 import os
 import shutil
@@ -54,14 +57,23 @@ class Summarization:
 
         self.data_set_result_id = data_set_result_id
         # 各データで使用するカラムを定義
+        # Create mappings for vacant_house_count columns (thresholds 5-95)
+        predicted_label_mappings = {
+            f"predicted_label_{threshold:02d}": (
+                f"predicted_label_{threshold:02d}"
+            )
+            for threshold in range(5, 96, 5)
+        }
+        
         self.INPUT_COLUMNS = {
             "akiya_pred": {
-                "setai_code": "世帯コード",
                 "predicted_label": "predicted_label",
-                "akiya_geometry": "geometry",
-                "世帯人数": "世帯人数",  # '世帯人数' カラムを追加
-                "15歳未満構成比": "15歳未満構成比",
-                "65歳以上人数": "65歳以上人数"
+                "geometry": "geometry",
+                "household_size": "世帯人数",
+                "members_under_15": "15歳未満人数",
+                "members_over_65": "65歳以上人数",
+                "normalized_address": "正規化住所",
+                **predicted_label_mappings
             },
             "city_block": {
                 "KEY_CODE": key_code,
@@ -69,23 +81,6 @@ class Summarization:
             }
         }
 
-        # 出力するデータのカラムを定義
-        OUTPUT = [
-            "住戸数",
-            "空き家数",
-            "空き家率",
-            "若年層率",
-            "高齢者率",
-            "geometry"
-        ]
-
-        if isinstance(self.key_column, list):
-            self.OUTPUT_COLUMNS = self.key_column + OUTPUT 
-        else:
-            self.OUTPUT_COLUMNS = [self.key_column] + OUTPUT 
-
-
-    
     def summarize_city_block(self, gdf):
         """
         市区町村ブロックごとの集計を行う関数。
@@ -101,30 +96,64 @@ class Summarization:
             地域ごとの住戸数、空き家数、空き家率、若年層率、高齢者率を集計したGeoDataFrame。
         """
         akiya_pred_cols = self.INPUT_COLUMNS["akiya_pred"]
+        # 0 is key_code(KEY_CODE), 1 is area_group(S_NAME)
+        key_col = self.key_column[0]
+        area_group_col = self.key_column[1]
 
-        # 各市区町村ブロックごとに集計を行う
-        summerized_gdf = gdf.groupby(self.key_column).agg(
-            住戸数=(akiya_pred_cols["setai_code"], "count"),
-            空き家数=(akiya_pred_cols["predicted_label"], "sum"),
-            人口=(akiya_pred_cols["世帯人数"], "sum"),  
-            若年人口=(akiya_pred_cols["15歳未満構成比"], "sum"), 
-            高齢者人口=(akiya_pred_cols["65歳以上人数"], "sum"),
-            reference_date=("reference_date", "first")   
+        # Create vacant_house_count aggregations for thresholds 5-95 (step 5)
+        vacant_house_agg = {
+            f"vacant_house_count_{threshold:02d}": (
+                akiya_pred_cols[f"predicted_label_{threshold:02d}"],
+                "sum"
+            )
+            for threshold in range(5, 96, 5)
+        }
+        
+        grouped_by_area = gdf.groupby(area_group_col).agg(
+            total_building_count=(akiya_pred_cols["normalized_address"], "count"),
+            vacant_house_count=(akiya_pred_cols["predicted_label"], "sum"),
+            **vacant_house_agg,
+            total_household_size=(akiya_pred_cols["household_size"], "sum"),
+            number_of_under_15_years_old=(akiya_pred_cols["members_under_15"], "sum"),
+            number_of_over_65_years_old=(akiya_pred_cols["members_over_65"], "sum"),
+            reference_date=("reference_date", "first")  
         )
-        summerized_gdf.reset_index(inplace=True)
+        grouped_by_area.reset_index(inplace=True)
 
-        # 空き家率を計算
-        summerized_gdf["空き家率"] = summerized_gdf["空き家数"] / summerized_gdf["住戸数"]
+        # Calculate rates for grouped data
+        grouped_by_area["predicted_probability"] = grouped_by_area.apply(
+            lambda row: row["vacant_house_count"] / row["total_building_count"] if row["total_building_count"] != 0 else 0,
+            axis=1
+        )
+        # Calculate predicted_probability for all thresholds (5-95, step 5)
+        # Use np.where for better performance and clarity
+        for threshold in range(5, 96, 5):
+            col_name = f"predicted_probability_{threshold:02d}"
+            vacant_col = f"vacant_house_count_{threshold:02d}"
+            # Divide by zero handling: where 住戸数 is 0, result is 0
+            grouped_by_area[col_name] = np.where(
+                grouped_by_area["total_building_count"] != 0,
+                grouped_by_area[vacant_col] / grouped_by_area["total_building_count"],
+                0
+            )
+        grouped_by_area["young_population_ratio"] = (
+            grouped_by_area["number_of_under_15_years_old"] / grouped_by_area["total_household_size"]
+        )
+        grouped_by_area["elderly_population_ratio"] = (
+            grouped_by_area["number_of_over_65_years_old"] / grouped_by_area["total_household_size"]
+        )
 
-        # 若年層率を計算
-        summerized_gdf["若年層率"] = summerized_gdf["若年人口"] / summerized_gdf["人口"]
-
-        # 高齢者率を計算
-        summerized_gdf["高齢者率"] = summerized_gdf["高齢者人口"] / summerized_gdf["人口"]
+        # Get unique combinations of key_code and area_group
+        unique_pairs = gdf[[key_col, area_group_col]].drop_duplicates()
+        # Merge grouped values back to all key_code-area_group pairs
+        summerized_gdf = pd.merge(
+            unique_pairs,
+            grouped_by_area,
+            on=area_group_col,
+            how="left"
+        )
 
         return summerized_gdf
-    
-    
     
     def remove_z_coordinate(self, geometry):
         """
@@ -157,8 +186,6 @@ class Summarization:
         空き家判定データと市区町村ブロックデータを空間結合する関数。
         空間インデックスを利用し、residence_gdfのジオメトリの重心（centroid）で空間結合を行います。
         """
-
-        residence_gdf = residence_gdf[["世帯コード","正規化住所","世帯人数","15歳未満人数","15歳未満構成比","15歳以上64歳以下人数","15歳以上64歳以下構成比","65歳以上人数","65歳以上構成比","男女比","住定期間","geometry","predicted_label", "reference_date"]]
         
         # 重心（centroid）を計算する前に、投影座標系（EPSG:4326）に変換
         residence_gdf_projected = residence_gdf.to_crs(epsg=4326)
@@ -195,16 +222,24 @@ class Summarization:
             SQLiteデータベースに挿入するための集計済みデータ。
         """
         try:
+            vacant_house_and_predicted_probability_mappings = {}
+            for threshold in range(5, 96, 5):
+                vacant_house_and_predicted_probability_mappings[
+                    f"vacant_house_count_{threshold:02d}"
+                ] = f"vacant_house_count_{threshold:02d}"
+                vacant_house_and_predicted_probability_mappings[
+                    f"predicted_probability_{threshold:02d}"
+                ] = f"predicted_probability_{threshold:02d}"
             # カラム名の日本語を英語に変換
             mapping_header = {
-                '住戸数': 'total_building_count',
-                '空き家数': 'vacant_house_count',
-                '若年層率': 'young_population_ratio',
-                '高齢者率': 'elderly_population_ratio',
-                # '空き家率': 'vacant_house_ratio',
+                'total_building_count': 'total_building_count',
+                'vacant_house_count': 'vacant_house_count',
+                'young_population_ratio': 'young_population_ratio',
+                'elderly_population_ratio': 'elderly_population_ratio',
+                'predicted_probability': 'predicted_probability',
+                **vacant_house_and_predicted_probability_mappings,
                 'reference_date': 'reference_date',
                 'AREA': 'area',
-                '空き家率': 'predicted_probability',
                 'geometry': 'geometry'
             }
 
@@ -236,20 +271,40 @@ class Summarization:
             ].empty else ''
 
             # Replace NaN, None, and empty values with the found value (or leave it empty if no valid value is found)
-            summerized_df['reference_date'] = summerized_df['reference_date'].replace([None, '', pd.NA], reference_date_value)
+            summerized_df['reference_date'] = summerized_df['reference_date'].fillna(reference_date_value).replace([None, '', pd.NA], reference_date_value)
             summerized_df['predicted_probability'] = summerized_df['predicted_probability'].fillna(0)
             summerized_df['vacant_house_count'] = summerized_df['vacant_house_count'].fillna(0)
+            for threshold in range(5, 96, 5):
+                vacant_house_count_col_name = f"vacant_house_count_{threshold:02d}"
+                predicted_probability_col_name = f"predicted_probability_{threshold:02d}"
+                summerized_df[vacant_house_count_col_name] = summerized_df[vacant_house_count_col_name].fillna(0)
+                summerized_df[predicted_probability_col_name] = summerized_df[predicted_probability_col_name].fillna(0)
             summerized_df['total_building_count'] = summerized_df['total_building_count'].fillna(0)
+            summerized_df['area'] = summerized_df['area'].fillna(0)
             summerized_df['young_population_ratio'] = summerized_df['young_population_ratio'].fillna(0)
             summerized_df['elderly_population_ratio'] = summerized_df['elderly_population_ratio'].fillna(0)
-            
-            is_success = create_data_set_detail_buildings_or_area(summerized_df, 'data_set_detail_areas')
-            if not is_success:
-                raise
+
+            # Group by area_group and sum metrics
+            if 'area_group' in summerized_df.columns:
+                agg_dict = {}
+                for col in [
+                    'area',  # 地域面積(Area size)
+                ]:
+                    if col in summerized_df.columns:
+                        agg_dict[col] = 'sum'
+                if agg_dict:
+                    grouped = summerized_df.groupby('area_group').agg(agg_dict)
+
+                    for col in grouped.columns:
+                        summerized_df[col] = (
+                            summerized_df['area_group'].map(grouped[col]).fillna(0)
+                        )
+
+            create_data_set_detail_buildings_or_area(summerized_df, 'data_set_detail_areas')
             
         except Exception as e:
             set_error(ERROR_20013)
-            raise
+            raise Exception(e)
 
     def read_file(self, path: str, **kwargs):
         """
@@ -289,8 +344,11 @@ class Summarization:
                     if file_extension == '.csv':
                         return pd.read_csv(path, encoding=encoding, **kwargs)
                     else:
-                        with fiona.Env(encoding=encoding):
-                            return gpd.read_file(path)
+                        try:
+                            return gpd.read_file(path, encoding=encoding)
+                        except:
+                            with fiona.Env(encoding=encoding):
+                                return gpd.read_file(path)
 
                 except UnicodeDecodeError:
                     # デコードエラーが発生した場合、次のエンコーディングを試す
@@ -298,6 +356,13 @@ class Summarization:
                 except ParserError:
                     # ParserErrorが発生した場合、次のエンコーディングを試す
                     continue
+
+            detected_encoding = detect_encoding(path)
+            if detected_encoding:
+                if file_extension == '.csv':
+                    return pd.read_csv(path, encoding=detected_encoding, **kwargs)
+                else:
+                    return gpd.read_file(path, encoding=encoding)
             
             # 適切なエンコーディングが見つからない場合、エラーを発生させる
             set_error(ERROR_00025, path)
@@ -306,12 +371,23 @@ class Summarization:
             # 何らかの例外が発生した場合、エラーメッセージを表示してNoneを返す
             if ERROR_CODE is None:
                 set_error(ERROR_00014, path)
-            raise
+                raise Exception(f"ファイル {path} の読み込み中にエラーが発生しました")
+            raise Exception(e)
     
     def process(self):
         residence_gdf = pd.read_csv(self.INPUT_PATHS["akiya_pred"], encoding='utf-8-sig')
         # 'geometry'列をWKT形式からジオメトリに変換
-        residence_gdf['geometry'] = residence_gdf['geometry'].apply(wkt.loads)
+        column_bldg_geometry = "建物ポリゴンジオメトリ情報"
+        if column_bldg_geometry in residence_gdf.columns:
+            # Handle null values: convert only valid WKT strings
+            residence_gdf['geometry'] = residence_gdf[
+                column_bldg_geometry
+            ].apply(lambda x: wkt.loads(x) if pd.notna(x) else None)
+        else:
+            # Handle null values: convert only valid WKT strings
+            residence_gdf['geometry'] = residence_gdf['geometry'].apply(
+                lambda x: wkt.loads(x) if pd.notna(x) else None
+            )
         # GeoDataFrameに変換
         residence_gdf = gpd.GeoDataFrame(residence_gdf, geometry='geometry')
         # 投影法の指定 (必要に応じてEPSGコードを指定)
@@ -322,13 +398,13 @@ class Summarization:
                 city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
             except:
                 set_error(ERROR_20017)
-                raise("Shapefile形式の場合、座標系情報が正しくZIP内に保存されているかなどをご確認ください。Shapefileの読み込みにはshp, shx, prj, dbfの４種類のファイルが必要となります。")
+                raise("地域集計用データ（Shapefile形式）に不備がある場合")
         elif "gpkg" in self.INPUT_PATHS["city_block"]:
             try:
                 city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
             except:
                 set_error(ERROR_20016)
-                raise("Geopackage形式の場合、座標系情報が正しくZIP内に保存されているかなどをご確認ください。他に複数レイヤが入っている場合にデータ提供元に問い合わせを推奨します。")
+                raise("地域集計用データ（gpkg形式）に不備がある場合")
         elif "geojson" in self.INPUT_PATHS["city_block"]:
             city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
         elif "csv" in self.INPUT_PATHS["city_block"]:
@@ -346,7 +422,7 @@ class Summarization:
 
         if city_block_gdf is None:
             set_error(ERROR_20011)
-            raise ValueError("エンコーディングやファイル形式などに異常がないかご確認ください。")
+            raise ValueError("地域集計用データが適切に読み込まれていません。")
         
         # 座標系変換
         residence_gdf = residence_gdf.to_crs("EPSG:4326")
@@ -357,19 +433,25 @@ class Summarization:
                 city_block_gdf[self.key_column[1]] = city_block_gdf[self.key_column[0]]
  
         # 空間結合
-        spatial_join_gdf = self.spatial_join(residence_gdf, city_block_gdf)
+        try:
+            spatial_join_gdf = self.spatial_join(residence_gdf, city_block_gdf)
 
-        # 小地域に集計
-        summerized_gdf = self.summarize_city_block(spatial_join_gdf)
+            # 小地域に集計
+            summerized_gdf = self.summarize_city_block(spatial_join_gdf)
 
-        # 小地域ポリゴンに集計結果を結合
-        summerized_gdf = pd.merge(city_block_gdf, summerized_gdf, how="left", right_on=self.key_column, left_on=self.key_column)
+            # 小地域ポリゴンに集計結果を結合
+            summerized_gdf = pd.merge(city_block_gdf, summerized_gdf, how="left", right_on=self.key_column,
+                                      left_on=self.key_column)
 
-        # insert sqlite
-        if self.data_set_result_id != 0:
-            self.insert_data_set_detail_areas(summerized_gdf, self.data_set_result_id, self.key_column)
-        else:
-            summerized_gdf.to_csv(self.OUTPUT_PATH, encoding="utf-8-sig", index=False)
+            # insert sqlite
+            if self.data_set_result_id != 0:
+                self.insert_data_set_detail_areas(summerized_gdf, self.data_set_result_id, self.key_column)
+            else:
+                summerized_gdf.to_csv(self.OUTPUT_PATH, encoding="utf-8-sig", index=False)
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
+            raise Exception(e)
 
 
 @staticmethod
@@ -389,7 +471,7 @@ def detect_encoding(file_path):
     """
     # ファイルの内容を読み込む
     with open(file_path, 'rb') as file:
-        raw_data = file.read()
+        raw_data = file.read(1000)
     # エンコーディングを検出して返す
     result = chardet.detect(raw_data)
     return result['encoding']
@@ -424,12 +506,21 @@ def extract_zip(zip_file, extract_to):
         shp_file = [os.path.join(extract_to, f) for f in files if f.endswith(".shp")][0]
     except:
         set_error(ERROR_20015)
-        raise Exception("地域集計用データがzipに含まれていない可能性があります。shapefileの読み込みにはshp, shx, prj, dbfの４種類のファイルが必要となります。")
+        raise Exception("地域集計用データ（shp形式）のデータが異常です。")
     return shp_file
 
 
-def process_summarization(akiya_pred_file, spatial_file, output_dir, key_column, job_id=None, db_path=None, process=0, data_set_result_id=0):
+def process_summarization(akiya_pred_file, spatial_file, output_dir, key_column, job_id=None, db_path=None, process=0, data_set_result_id=0, logs_dir=None):
+    logger = None
     try:
+        # Initialize logger if logs_dir is provided
+        if logs_dir:
+            logger = get_rotating_logger(logs_dir, logger_name="E032")
+        elif output_dir:
+            logs_dir = os.path.join(output_dir, "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            logger = get_rotating_logger(logs_dir, logger_name="E032")
+        
         if db_path:
             connect_sqllite(db_path)
         task_id = None
@@ -512,11 +603,13 @@ def process_summarization(akiya_pred_file, spatial_file, output_dir, key_column,
             
         return output_path
     except Exception as e:
+        if logger:
+            logger.error("E032 failed:\n%s", traceback.format_exc())
         if ERROR_CODE is None:
             set_error(ERROR_20012)
         if task_id is not None:
             create_or_update_job_task(job_id, progress_percent="", preprocess_type=None, error_code=ERROR_CODE, error_msg=ERROR_MSG, result=json.dumps({}), id= task_id, is_finish=True)
-        raise Exception("集計に用いているデータに型の不一致や欠損がないかご確認ください")
+        raise Exception("地域集計処理においてエラーが発生しています。")
 
 def set_error(value, param_st1=None, param_st2=None):
     global ERROR_CODE

@@ -1,0 +1,45 @@
+name: バグ報告
+description: バグを報告する
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: 何が起きたか、何を期待していたかを記載してください
+      placeholder: |
+        ボタンをクリックしても処理が開始されない。
+        クリック後にジョブが開始され、進捗が表示されることを期待していた。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. ワークブック画面で「名寄せ」を選択
+        2. データソースを設定して「実行」をクリック
+        3. 何も起こらない
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: 環境
+      options:
+        - Windows 10（本番環境）
+        - macOS（開発環境）
+        - 両方
+        - 不明
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: スクリーンショット・ログ
+      description: 任意。エラーメッセージやスクリーンショットがあれば貼り付けてください
+    validations:
+      required: false

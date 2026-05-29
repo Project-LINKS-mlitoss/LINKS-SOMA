@@ -1,11 +1,11 @@
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::{HashMap, HashSet}, str::FromStr};
 
 use indexmap::IndexMap;
-use sqlx::{sqlite::*, Acquire, ConnectOptions, Pool, Row};
+use sqlx::{sqlite::*, Acquire, ConnectOptions, Pool, Row, Column};
 use thiserror::Error;
 use url::Url;
-
 use crate::table::TableInfo;
+use crate::geometry::{wkb_to_wkt};
 
 pub struct GpkgHandler {
     pool: Pool<Sqlite>,

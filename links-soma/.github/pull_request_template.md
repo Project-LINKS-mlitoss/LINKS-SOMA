@@ -1,9 +1,26 @@
-## 📝 Related Issues / 関連Issue
+## 概要
 
-- Close #{issue number}
-- 関連するIssueを記載してください。（例: Close #123）
+<!-- 何を・なぜ変更したか。1-3行で -->
 
-## 🔍 Changes / 変更内容
+## 影響範囲
 
-- [ ] List major changes in this PR.
-- [ ] 主な変更点を列挙してください。
+<!-- 該当するものにチェック。チェックした項目は下の確認事項に連動 -->
+
+- [ ] ml/src（MLパイプライン）
+- [ ] フロントエンド（UI・画面）
+- [ ] DB（スキーマ・マイグレーション）
+- [ ] ドキュメントのみ
+
+## 確認事項
+
+<!-- 影響範囲に応じて記入。該当しない行は削除 -->
+
+- [ ] pytest PASS（ml/src変更時: CI で自動実行。失敗時はローカルで `cd ml && npm test` で再現）
+- [ ] Pythonビルド成功（ml/src変更時: `cd ml && npm run build`）
+- [ ] lint PASS（CI で自動実行。警告は Checks タブの annotation で確認。失敗時はローカルで `npm run lint` で再現）
+- [ ] building/area両方の単位で動作確認（view.unit分岐に影響する場合）
+- [ ] Windows固有の挙動に影響しないことを確認（パス区切り・エンコーディング・プロセス管理）
+
+## 関連issue
+
+<!-- closes #番号 -->

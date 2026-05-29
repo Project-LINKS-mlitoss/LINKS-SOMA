@@ -15,23 +15,31 @@ use nusamai_gpkg::{geometry::write_indexed_multipolygon, GpkgHandler};
 use rayon::prelude::*;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
+use std::thread;
 use std::{collections::HashSet, path::PathBuf, time::Duration};
 use table::schema_to_table_infos;
-use std::thread;
 
 use crate::{
     get_parameter_value,
-    option::use_lod_config,
     parameters::*,
     pipeline::{Feedback, PipelineError, Receiver, Result},
     sink::{DataRequirements, DataSink, DataSinkProvider, SinkInfo},
     transformer,
-    transformer::TransformerRegistry,
+    transformer::{use_lod_config, TransformerSettings},
 };
+use csv::WriterBuilder;
 use std::fs::{self, File};
-use std::io::{Write, BufReader, Read};
-use zip::{write::FileOptions, CompressionMethod, ZipWriter};
+use std::io::{BufReader, BufWriter, Read, Write};
 use walkdir::WalkDir;
+use zip::{write::FileOptions, CompressionMethod, ZipWriter};
+use geo::{Centroid, Geometry};
+use geo_types::{LineString};
+use regex::Regex;
+use std::convert::TryInto;
+use wkt::Wkt;
+use std::fs::OpenOptions;
+use anyhow::Result as AnyhowResult;
+use geographiclib_rs::{Geodesic, PolygonArea, Winding};
 
 use super::option::output_parameter;
 #[derive(Clone)]
@@ -57,9 +65,9 @@ impl DataSinkProvider for GpkgSinkProvider {
         params
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let mut settings: TransformerRegistry = TransformerRegistry::new();
-        settings.insert(use_lod_config("all_lod"));
+    fn transformer_options(&self) -> TransformerSettings {
+        let mut settings: TransformerSettings = TransformerSettings::new();
+        settings.insert(use_lod_config("all_lod", Some(&["all_lod"])));
 
         settings
     }
@@ -77,7 +85,7 @@ impl DataSinkProvider for GpkgSinkProvider {
 
 pub struct GpkgSink {
     output_path: PathBuf,
-    transform_settings: TransformerRegistry,
+    transform_settings: TransformerSettings,
 }
 
 // An ephimeral container to wrap and pass the data in the pipeline
@@ -299,7 +307,7 @@ impl GpkgSink {
                     merged_data.insert(
                         obj_id.clone(),
                         FeatureData {
-                            table_name,
+                            table_name: table_name.clone(),
                             geometry,
                             attributes: flattened_attributes,
                         },
@@ -310,7 +318,7 @@ impl GpkgSink {
                         if let Some(feature_data) = merged_data.get_mut(parent_id) {
                             attributes.shift_remove("parentId");
                             attributes.shift_remove("parentType");
-                    
+
                             let category = if created_tables.contains("bldg:Building") {
                                 Some("Building")
                             } else if created_tables.contains("wtr:WaterBody") {
@@ -320,7 +328,7 @@ impl GpkgSink {
                             } else {
                                 None
                             };
-                    
+
                             if let Some(_cat) = category {
                                 if !matches!(
                                     table_name.as_str(),
@@ -345,15 +353,14 @@ impl GpkgSink {
                                     &created_tables.clone(),
                                 );
                             }
-                    
+
                             attributes = Self::process_all_values(attributes);
-                    
+
                             for (key, value) in attributes {
                                 feature_data.attributes.entry(key).or_insert(value);
                             }
                         }
                     }
-                    
                 }
             }
         }
@@ -435,6 +442,8 @@ impl GpkgSink {
             handler.close().await;
         }
 
+        feedback.info("Zipping PLATEAU...".into());
+
         let _ = Self::zip_folder(output_path_init);
 
         feedback.info("Complete processing".into());
@@ -445,43 +454,47 @@ impl GpkgSink {
         }
     }
 
+
     fn zip_folder(src_folder: PathBuf) -> std::io::Result<()> {
         let zip_file_path = src_folder.join("PLATEAU.zip");
         let zip_file = File::create(&zip_file_path)?;
         let mut zip = ZipWriter::new(zip_file);
-    
+
         let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
         let buffer_size: usize = 5 * 1024 * 1024; // 5MB buffer
         let sleep_time = Duration::from_millis(500);
-    
+
         for entry in WalkDir::new(&src_folder).max_depth(1) {
             let entry = entry?;
             let entry_path = entry.path();
-    
-            if entry_path.is_file() && entry_path.extension().map_or(false, |ext| ext == "gpkg") {
-                let relative_path = entry_path.strip_prefix(&src_folder).unwrap();
-                zip.start_file(relative_path.to_string_lossy(), options)?;
-    
-                let mut file = BufReader::new(File::open(entry_path)?);
-                let mut buffer = vec![0; buffer_size];
-    
-                loop {
-                    let bytes_read = file.read(&mut buffer)?;
-                    if bytes_read == 0 {
-                        break;
+
+            if entry_path.is_file() {
+                let ext = entry_path.extension().map_or("", |e| e.to_str().unwrap());
+                if ext == "gpkg" || (ext == "csv" && entry_path.file_name().unwrap() == "PLATEAU建築物.csv") {
+                    let relative_path = entry_path.strip_prefix(&src_folder).unwrap();
+                    zip.start_file(relative_path.to_string_lossy(), options)?;
+
+                    let mut file = BufReader::new(File::open(entry_path)?);
+                    let mut buffer = vec![0; buffer_size];
+
+                    loop {
+                        let bytes_read = file.read(&mut buffer)?;
+                        if bytes_read == 0 {
+                            break;
+                        }
+                        zip.write_all(&buffer[..bytes_read])?;
+
+                        if bytes_read >= buffer_size {
+                            thread::sleep(sleep_time);
+                        }
                     }
-                    zip.write_all(&buffer[..bytes_read])?;
-    
-                    if bytes_read >= buffer_size {
-                        thread::sleep(sleep_time);
-                    }
+
+                    fs::remove_file(entry_path)?;
                 }
-    
-                fs::remove_file(entry_path)?;
             }
         }
-    
-        zip.finish()?; 
+
+        zip.finish()?;
         Ok(())
     }
 
@@ -493,7 +506,7 @@ impl GpkgSink {
     ) {
         let is_building = created_tables.contains("bldg:Building");
         let is_waterbody = created_tables.contains("wtr:WaterBody");
-    
+
         let risk_attributes = [
             "InlandFloodingRiskAttribute",
             "HighTideRiskAttribute",
@@ -502,17 +515,20 @@ impl GpkgSink {
             "RiverFloodingRiskAttribute",
             "TsunamiRiskAttribute",
         ];
-    
+
         let (new_prefix, new_table_name) = if is_building && risk_attributes.contains(&table_name) {
-            ("buildingDisasterRiskAttribute", format!("Building{}", table_name))
+            (
+                "buildingDisasterRiskAttribute",
+                format!("Building{}", table_name),
+            )
         } else if is_waterbody && risk_attributes.contains(&table_name) {
             ("floodingRiskAttribute", format!("WaterBody{}", table_name))
         } else {
             (prefix, table_name.to_string())
         };
-    
+
         let keys_to_rename: Vec<String> = updated_attributes.keys().cloned().collect();
-    
+
         for key in keys_to_rename {
             if let Some(value) = updated_attributes.shift_remove(&key) {
                 let new_key = if new_prefix.is_empty() {
@@ -672,11 +688,25 @@ impl GpkgSink {
         }
         updated_attributes
     }
+
+    fn is_counter_clockwise(ring: &LineString<f64>) -> bool {
+        let mut sum = 0.0;
+        let coords = ring.coords().collect::<Vec<_>>();
+        for i in 0..coords.len() - 1 {
+            let (x0, y0) = (coords[i].x, coords[i].y);
+            let (x1, y1) = (coords[i + 1].x, coords[i + 1].y);
+            sum += (x1 - x0) * (y1 + y0);
+        }
+        sum < 0.0 
+    }
+
 }
+
+
 pub enum GpkgTransformOption {}
 
 impl DataSink for GpkgSink {
-    fn make_requirements(&mut self, properties: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, properties: TransformerSettings) -> DataRequirements {
         let default_requirements = DataRequirements {
             tree_flattening: transformer::TreeFlatteningSpec::Flatten {
                 feature: transformer::FeatureFlatteningOption::AllExceptThematicSurfaces,

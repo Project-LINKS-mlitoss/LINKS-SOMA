@@ -16,7 +16,6 @@ use std::{
 };
 
 use crate::sink::mvt::tileid::TileIdMethod;
-use ahash::RandomState;
 use atlas_packer::{
     export::{AtlasExporter as _, WebpAtlasExporter},
     pack::AtlasPacker,
@@ -28,11 +27,12 @@ use atlas_packer::{
 };
 use bytemuck::Zeroable;
 use earcut::{utils3d::project3d_to_2d, Earcut};
+use foldhash::fast::RandomState;
+use geocentric::geodetic_to_geocentric;
 use gltf::write_gltf_glb;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use nusamai_citygml::{object::Value, schema::Schema};
-use nusamai_projection::cartesian::geodetic_to_geocentric;
 use rayon::prelude::*;
 use slice::{slice_to_tiles, SlicedFeature};
 use tempfile::tempdir;
@@ -41,11 +41,10 @@ use url::Url;
 
 use crate::{
     get_parameter_value,
-    option::use_textured_lod_config,
     parameters::*,
     pipeline::{Feedback, PipelineError, Receiver, Result},
     sink::{DataRequirements, DataSink, DataSinkProvider, SinkInfo},
-    transformer::TransformerRegistry,
+    transformer::{use_lod_config, TransformerSettings},
 };
 use utils::calculate_normal;
 
@@ -108,9 +107,12 @@ impl DataSinkProvider for CesiumTilesSinkProvider {
         params
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let mut settings: TransformerRegistry = TransformerRegistry::new();
-        settings.insert(use_textured_lod_config("max_lod"));
+    fn transformer_options(&self) -> TransformerSettings {
+        let mut settings: TransformerSettings = TransformerSettings::new();
+        settings.insert(use_lod_config(
+            "max_lod",
+            Some(&["textured_max_lod", "all_lod"]),
+        ));
 
         settings
     }
@@ -137,7 +139,7 @@ impl DataSinkProvider for CesiumTilesSinkProvider {
 
 struct CesiumTilesSink {
     output_path: PathBuf,
-    transform_settings: TransformerRegistry,
+    transform_settings: TransformerSettings,
     limit_texture_resolution: Option<bool>,
     gzip_compress: Option<bool>,
     min_z: u8,
@@ -145,7 +147,7 @@ struct CesiumTilesSink {
 }
 
 impl DataSink for CesiumTilesSink {
-    fn make_requirements(&mut self, properties: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, properties: TransformerSettings) -> DataRequirements {
         let default_requirements = DataRequirements {
             resolve_appearance: true,
             key_value: crate::transformer::KeyValueSpec::JsonifyObjects,
@@ -282,7 +284,7 @@ fn feature_sorting_stage(
     receiver_sliced: mpsc::Receiver<(u64, String, Vec<u8>)>,
     sender_sorted: mpsc::SyncSender<(u64, String, Vec<Vec<u8>>)>,
 ) -> Result<()> {
-    let mut typename_to_seq: IndexSet<String, ahash::RandomState> = Default::default();
+    let mut typename_to_seq: IndexSet<String, foldhash::fast::RandomState> = Default::default();
 
     let config = kv_extsort::SortConfig::default()
         .max_chunk_bytes(256 * 1024 * 1024) // TODO: Configurable
@@ -379,7 +381,8 @@ fn tile_writing_stage(
                 // Use the tile center as the translation of the glTF mesh
                 let translation = {
                     let (tx, ty, tz) = geodetic_to_geocentric(
-                        &ellipsoid,
+                        ellipsoid.a(),
+                        ellipsoid.e_sq(),
                         (min_lng + max_lng) / 2.0,
                         (min_lat + max_lat) / 2.0,
                         0.,
@@ -452,8 +455,13 @@ fn tile_writing_stage(
                                 // - z-up to y-up
                                 // - subtract the translation
                                 // - The origin of atlas-packer is in the lower right.
-                                let (x, y, z) =
-                                    geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                                let (x, y, z) = geodetic_to_geocentric(
+                                    ellipsoid.a(),
+                                    ellipsoid.e_sq(),
+                                    lng,
+                                    lat,
+                                    height,
+                                );
                                 [
                                     x - translation[0],
                                     z - translation[1],

@@ -95,7 +95,21 @@ export const RunTab = (): JSX.Element => {
     handleSubmit,
     formState: { isValid },
     getValues,
+    watch,
   } = useFormContext<FormValues>();
+
+  // Watch form values to check if CSV is uploaded and column is selected
+  const csvData = watch('csvData', []);
+  const columns = watch('columns', {});
+  const apiType = watch('apiType');
+  const apiToken = watch('apiToken', '');
+  const addressColumn = columns['住所に対応するカラムを選択'];
+  
+  // Check if CSV is uploaded, column is selected, and API token is provided (ABR doesn't need token)
+  const hasApiCredentials = apiType === 'abr' 
+    ? true // ABR doesn't need credentials, data is pre-downloaded
+    : (apiToken && apiToken.trim() !== '');
+  const isDataReady = csvData && csvData.length > 0 && addressColumn && addressColumn.trim() !== '' && hasApiCredentials;
 
   /**
    * モック実行（testRun用）
@@ -180,6 +194,11 @@ export const RunTab = (): JSX.Element => {
         };
         setTestSummary(testSummaryLocal);
 
+        // Update completed count only if successful
+        if (result.success) {
+          setCompletedCount(1);
+        }
+
         // runSummary は上書きしない
         setRunSummary(null);
         setVisibleCount(50);
@@ -189,13 +208,79 @@ export const RunTab = (): JSX.Element => {
         const addressColumn = columns["住所に対応するカラムを選択"];
         const geocodeFunc = getGeocodingFunction(apiType);
 
+        // Use appropriate token based on API type (ABR doesn't need token)
+        const tokenOrEmpty = apiType === 'abr' ? '' : apiToken;
+
         const results: GeocodingResult[] = [];
-        for (const [index, address] of csvData
-          .map((row) => row[addressColumn])
-          .entries()) {
-          const r = await geocodeFunc(address, apiToken);
-          results.push(r);
-          setCompletedCount(index + 1);
+        
+        if (apiType === 'ntt') {
+          // NTT: Run sequentially like Python code
+          // Rate limiting: 0.2 seconds between each request (rate_limit_sleep = 0.2)
+          for (const [index, address] of csvData
+            .map((row) => row[addressColumn])
+            .entries()) {
+            const r = await geocodeFunc(address, tokenOrEmpty);
+            results.push(r);
+            setCompletedCount(index + 1);
+            
+            // Rate limiting: 0.2 seconds between requests (like Python code line 342-344)
+            if (index < csvData.length - 1) {
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+          }
+        } else if (apiType === 'abr') {
+          // ABR: Use batch geocode for better performance
+          const addresses = csvData.map((row) => row[addressColumn]);
+          const batchSize = 100;
+          let completedSoFar = 0;
+          
+          for (let batchStart = 0; batchStart < addresses.length; batchStart += batchSize) {
+            const batchEnd = Math.min(batchStart + batchSize, addresses.length);
+            const batch = addresses.slice(batchStart, batchEnd);
+            
+            // Use batch geocode (single process call for entire batch)
+            if (typeof window !== 'undefined' && window.electronAPI) {
+              const batchResults = await window.electronAPI.abr.geocodeBatch(batch);
+              
+              // Convert to GeocodingResult format
+              const convertedResults: GeocodingResult[] = batchResults.map((r) => ({
+                lat: r.lat || 0,
+                lon: r.lon || 0,
+                label: r.label || '',
+                success: r.success,
+                errorMessage: r.errorMessage,
+                score: r.score,
+                matchLevel: r.matchLevel,
+                coordinateLevel: r.coordinateLevel,
+                rsdtAddrFlg: r.rsdtAddrFlg,
+              }));
+              
+              // Add results in order
+              results.push(...convertedResults);
+              
+              // Update completed count after batch completes
+              completedSoFar += convertedResults.length;
+              setCompletedCount(completedSoFar);
+            } else {
+              // Fallback to individual calls if batch not available
+              const batchPromises = batch.map((address) => 
+                geocodeFunc(address, tokenOrEmpty)
+              );
+              const batchResults = await Promise.all(batchPromises);
+              results.push(...batchResults);
+              completedSoFar += batchResults.length;
+              setCompletedCount(completedSoFar);
+            }
+          }
+        } else {
+          // AWS, Zenrin: Run sequentially
+          for (const [index, address] of csvData
+            .map((row) => row[addressColumn])
+            .entries()) {
+            const r = await geocodeFunc(address, tokenOrEmpty);
+            results.push(r);
+            setCompletedCount(index + 1);
+          }
         }
 
         const successCount = results.filter((r) => r.success).length;
@@ -246,7 +331,7 @@ export const RunTab = (): JSX.Element => {
       return;
     }
     const formData = getValues();
-    const { csvData } = formData;
+    const { csvData, apiType } = formData;
 
     const updatedData = csvData.map((row, index) => {
       const result = runSummary.results[index] || {
@@ -255,7 +340,8 @@ export const RunTab = (): JSX.Element => {
         success: false,
         errorMessage: "範囲外",
       };
-      return {
+      
+      const baseRow = {
         ...row,
         緯度: result.lat,
         経度: result.lon,
@@ -263,6 +349,19 @@ export const RunTab = (): JSX.Element => {
           ? {}
           : { エラーメッセージ: result.errorMessage || "原因不明のエラー" }),
       };
+      
+      // Add ABR specific fields if using ABR API
+      if (apiType === 'abr' && result.success) {
+        return {
+          ...baseRow,
+          ...(result.score !== undefined && { score: result.score }),
+          ...(result.matchLevel && { match_level: result.matchLevel }),
+          ...(result.coordinateLevel && { coordinate_level: result.coordinateLevel }),
+          ...(result.rsdtAddrFlg !== undefined && { rsdt_addr_flg: result.rsdtAddrFlg }),
+        };
+      }
+      
+      return baseRow;
     });
 
     // CSV文字列へ変換し、BOMを付与
@@ -398,7 +497,7 @@ export const RunTab = (): JSX.Element => {
             className={styles.tabContentWrapper}
           >
             <div className={styles.buttonWrapper}>
-              <Button type="submit" disabled={!isValid || isLoading}>
+              <Button type="submit" disabled={!isValid || !isDataReady || isLoading}>
                 テスト実行
               </Button>
               <Button
@@ -408,18 +507,23 @@ export const RunTab = (): JSX.Element => {
               >
                 モック実行
               </Button>
-              <Button disabled={!isValid || isLoading}>前回途中から実行</Button>
+              <Button disabled={!isValid || !isDataReady || isLoading}>前回途中から実行</Button>
             </div>
 
             <div className={styles.result}>
               <div className={styles.resultTitle}>テスト実行結果</div>
               {isLoading ? (
-                <Spinner label="実行中..." size="medium" />
+                <>
+                  <Spinner label="実行中..." size="medium" />
+                  <div style={{ marginTop: "8px" }}>
+                    完了件数: {completedCount} / 1
+                  </div>
+                </>
               ) : (
                 // testSummary の表示
                 renderTestSummary()
               )}
-              {testSummary && (
+              {testSummary && !isLoading && (
                 <div style={{ marginTop: "8px" }}>
                   完了件数: {completedCount} / {testSummary.total}
                 </div>
@@ -435,10 +539,10 @@ export const RunTab = (): JSX.Element => {
             className={styles.tabContentWrapper}
           >
             <div className={styles.buttonWrapper}>
-              <Button type="submit" disabled={!isValid || isLoading}>
+              <Button type="submit" disabled={!isValid || !isDataReady || isLoading}>
                 実行
               </Button>
-              <Button disabled={!isValid || isLoading}>前回途中から実行</Button>
+              <Button disabled={!isValid || !isDataReady || isLoading}>前回途中から実行</Button>
               <Button
                 onClick={handleDownload}
                 type="button"
@@ -451,12 +555,19 @@ export const RunTab = (): JSX.Element => {
             <div className={styles.result}>
               <div className={styles.resultTitle}>本番実行結果</div>
               {isLoading ? (
-                <Spinner label="実行中..." size="medium" />
+                <>
+                  <Spinner label="実行中..." size="medium" />
+                  {csvData && csvData.length > 0 && (
+                    <div style={{ marginTop: "8px" }}>
+                      完了件数: {completedCount} / {csvData.length}
+                    </div>
+                  )}
+                </>
               ) : (
                 // runSummary の表示
                 renderRunSummary()
               )}
-              {runSummary && (
+              {runSummary && !isLoading && (
                 <div style={{ marginTop: "8px" }}>
                   完了件数: {completedCount} / {runSummary.total}
                 </div>

@@ -4,7 +4,6 @@ mod obj_writer;
 
 use std::{f64::consts::FRAC_PI_2, path::PathBuf, sync::Mutex};
 
-use ahash::{HashMap, HashMapExt};
 use atlas_packer::{
     export::{AtlasExporter as _, JpegAtlasExporter},
     pack::AtlasPacker,
@@ -16,6 +15,7 @@ use atlas_packer::{
 };
 use earcut::{utils3d::project3d_to_2d, Earcut};
 use flatgeom::MultiPolygon;
+use foldhash::{HashMap, HashMapExt};
 use glam::{DMat4, DVec3, DVec4};
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -25,21 +25,20 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use geocentric::geodetic_to_geocentric;
 use nusamai_citygml::{
     object::{ObjectStereotype, Value},
     schema::Schema,
     GeometryType,
 };
 use nusamai_plateau::appearance;
-use nusamai_projection::cartesian::geodetic_to_geocentric;
 
 use crate::{
     get_parameter_value,
-    option::use_textured_lod_config,
     parameters::*,
     pipeline::{Feedback, PipelineError, Receiver, Result},
     sink::{DataRequirements, DataSink, DataSinkProvider, SinkInfo},
-    transformer::TransformerRegistry,
+    transformer::{use_lod_config, TransformerSettings},
 };
 
 use super::option::{limit_texture_resolution_parameter, output_parameter};
@@ -72,9 +71,9 @@ impl DataSinkProvider for ObjSinkProvider {
         params
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let mut settings: TransformerRegistry = TransformerRegistry::new();
-        settings.insert(use_textured_lod_config("max_lod"));
+    fn transformer_options(&self) -> TransformerSettings {
+        let mut settings: TransformerSettings = TransformerSettings::new();
+        settings.insert(use_lod_config("max_lod", Some(&["textured_max_lod"])));
 
         settings
     }
@@ -97,7 +96,7 @@ impl DataSinkProvider for ObjSinkProvider {
 
 pub struct ObjSink {
     output_path: PathBuf,
-    transform_settings: TransformerRegistry,
+    transform_settings: TransformerSettings,
     obj_options: ObjParams,
     limit_texture_resolution: Option<bool>,
 }
@@ -177,7 +176,7 @@ pub struct FeatureMaterial {
 }
 
 impl DataSink for ObjSink {
-    fn make_requirements(&mut self, properties: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, properties: TransformerSettings) -> DataRequirements {
         let default_requirements: DataRequirements = DataRequirements {
             resolve_appearance: true,
             key_value: crate::transformer::KeyValueSpec::JsonifyObjectsAndArrays,
@@ -341,7 +340,8 @@ impl DataSink for ObjSink {
 
             let psi = ((1. - ellipsoid.e_sq()) * center_lat.to_radians().tan()).atan();
 
-            let (tx, ty, tz) = geodetic_to_geocentric(&ellipsoid, center_lng, center_lat, 0.);
+            let (tx, ty, tz) =
+                geodetic_to_geocentric(ellipsoid.a(), ellipsoid.e_sq(), center_lng, center_lat, 0.);
             let h = (tx * tx + ty * ty + tz * tz).sqrt();
 
             DMat4::from_translation(DVec3::new(0., -h, 0.))
@@ -400,8 +400,13 @@ impl DataSink for ObjSink {
                         feature
                             .polygons
                             .transform_inplace(|&[lng, lat, height, u, v]| {
-                                let (x, y, z) =
-                                    geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                                let (x, y, z) = geodetic_to_geocentric(
+                                    ellipsoid.a(),
+                                    ellipsoid.e_sq(),
+                                    lng,
+                                    lat,
+                                    height,
+                                );
                                 let v_xyz = DVec4::new(x, z, -y, 1.0);
                                 let v_enu = transform_matrix * v_xyz;
                                 [v_enu[0], v_enu[1], v_enu[2], u, v]

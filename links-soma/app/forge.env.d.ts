@@ -9,6 +9,18 @@ declare global {
   const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
   const MAIN_WINDOW_VITE_NAME: string;
 
+  // ビルド日時の定義
+  const __BUILD_DATE__: string;
+  const __BUILD_TIMESTAMP__: number;
+
+  // Git情報の定義
+  const __GIT_COMMIT_HASH__: string;
+  const __GIT_BRANCH__: string;
+
+  // ビルド環境情報の定義
+  const __BUILD_ENV__: string;
+  const __WORKFLOW_RUN__: number | null;
+
   namespace NodeJS {
     interface Process {
       // Used for hot reload after preload scripts.

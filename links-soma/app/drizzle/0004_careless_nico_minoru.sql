@@ -1,0 +1,1 @@
+ALTER TABLE `data_set_detail_buildings` DROP COLUMN `num_householdsize_after_changes`;

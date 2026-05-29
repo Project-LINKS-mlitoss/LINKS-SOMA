@@ -1,8 +1,8 @@
 use std::io::Write;
 
-use ahash::{HashMap, HashSet};
 use byteorder::{ByteOrder, LittleEndian};
 use flate2::{write::GzEncoder, Compression};
+use foldhash::{HashMap, HashSet};
 use indexmap::IndexSet;
 use nusamai_gltf_json::extensions::mesh::ext_mesh_features;
 
@@ -192,8 +192,9 @@ pub fn write_gltf_glb<W: Write>(
         }
     }
 
-    let mut image_set: IndexSet<material::Image, ahash::RandomState> = Default::default();
-    let mut texture_set: IndexSet<material::Texture, ahash::RandomState> = Default::default();
+    let mut image_set: IndexSet<material::Image, foldhash::fast::RandomState> = Default::default();
+    let mut texture_set: IndexSet<material::Texture, foldhash::fast::RandomState> =
+        Default::default();
 
     // materials
     let gltf_materials = primitives
@@ -238,7 +239,7 @@ pub fn write_gltf_glb<W: Write>(
             .extensions
             .as_ref()
             .and_then(|ext| ext.ext_texture_webp.as_ref())
-            .map_or(false, |_| true)
+            .is_some_and(|_| true)
     });
 
     let extensions_used = {

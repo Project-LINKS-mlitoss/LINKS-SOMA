@@ -46,6 +46,147 @@ pub enum WkbGeometryType {
     GeometryCollectionZM = 3007,
 }
 
+// Parse WKB to WKT
+pub fn wkb_to_wkt(data: &[u8]) -> String {
+    if data.len() < 8 {
+        return String::new();
+    }
+
+    let wkb = &data[8..];
+    if wkb.is_empty() {
+        return String::new();
+    }
+
+    // Get byte order
+    let byte_order = wkb[0];
+    let is_little_endian = byte_order == WkbByteOrder::LittleEndian as u8;
+
+    // Get geometry type
+    let type_bytes = &wkb[1..5];
+    let geometry_type = if is_little_endian {
+        u32::from_le_bytes([type_bytes[0], type_bytes[1], type_bytes[2], type_bytes[3]])
+    } else {
+        u32::from_be_bytes([type_bytes[0], type_bytes[1], type_bytes[2], type_bytes[3]])
+    };
+    // Parse coordinates based on geometry type
+    match geometry_type {
+        1 => parse_point(&wkb[5..], is_little_endian),
+        1001 => parse_point_z(&wkb[5..], is_little_endian),
+        6 => parse_multipolygon(&wkb[5..], is_little_endian),
+        1006 => parse_multipolygon_z(&wkb[5..], is_little_endian),
+        _ => format!("GEOMETRY_TYPE_{}", geometry_type),
+    }
+}
+
+fn read_f64(data: &[u8], offset: &mut usize, is_little_endian: bool) -> f64 {
+    let bytes = &data[*offset..*offset + 8];
+    let value = if is_little_endian {
+        f64::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]])
+    } else {
+        f64::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]])
+    };
+    *offset += 8;
+    value
+}
+
+fn parse_point(data: &[u8], is_little_endian: bool) -> String {
+    let mut offset = 0;
+    let x = read_f64(data, &mut offset, is_little_endian);
+    let y = read_f64(data, &mut offset, is_little_endian);
+    format!("POINT({} {})", x, y)
+}
+
+fn parse_point_z(data: &[u8], is_little_endian: bool) -> String {
+    let mut offset = 0;
+    let x = read_f64(data, &mut offset, is_little_endian);
+    let y = read_f64(data, &mut offset, is_little_endian);
+    let z = read_f64(data, &mut offset, is_little_endian);
+    format!("POINT Z({} {} {})", x, y, z)
+}
+
+fn parse_multipolygon(data: &[u8], is_little_endian: bool) -> String {
+    let mut offset = 0;
+    let num_polygons = if is_little_endian {
+        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+    } else {
+        u32::from_be_bytes([data[0], data[1], data[2], data[3]])
+    };
+    offset += 4;
+
+    let mut polygons = Vec::new();
+    for _ in 0..num_polygons {
+        offset += 5; // Skip byte order and geometry type
+        let num_rings = if is_little_endian {
+            u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        } else {
+            u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        };
+        offset += 4;
+
+        let mut rings = Vec::new();
+        for _ in 0..num_rings {
+            let num_points = if is_little_endian {
+                u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            } else {
+                u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            };
+            offset += 4;
+
+            let mut points = Vec::new();
+            for _ in 0..num_points {
+                let x = read_f64(data, &mut offset, is_little_endian);
+                let y = read_f64(data, &mut offset, is_little_endian);
+                points.push(format!("{} {}", x, y));
+            }
+            rings.push(format!("({})", points.join(", ")));
+        }
+        polygons.push(format!("({})", rings.join(", ")));
+    }
+    format!("MULTIPOLYGON({})", polygons.join(", "))
+}
+
+fn parse_multipolygon_z(data: &[u8], is_little_endian: bool) -> String {
+    let mut offset = 0;
+    let num_polygons = if is_little_endian {
+        u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+    } else {
+        u32::from_be_bytes([data[0], data[1], data[2], data[3]])
+    };
+    offset += 4;
+
+    let mut polygons = Vec::new();
+    for _ in 0..num_polygons {
+        offset += 5; // Skip byte order and geometry type
+        let num_rings = if is_little_endian {
+            u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        } else {
+            u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+        };
+        offset += 4;
+
+        let mut rings = Vec::new();
+        for _ in 0..num_rings {
+            let num_points = if is_little_endian {
+                u32::from_le_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            } else {
+                u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+            };
+            offset += 4;
+
+            let mut points = Vec::new();
+            for _ in 0..num_points {
+                let x = read_f64(data, &mut offset, is_little_endian);
+                let y = read_f64(data, &mut offset, is_little_endian);
+                let z = read_f64(data, &mut offset, is_little_endian);
+                points.push(format!("{} {} {}", x, y, z));
+            }
+            rings.push(format!("({})", points.join(", ")));
+        }
+        polygons.push(format!("({})", rings.join(", ")));
+    }
+    format!("MULTIPOLYGON Z({})", polygons.join(", "))
+}
+
 fn write_geometry_header<W: Write>(writer: &mut W, srs_id: i32) -> std::io::Result<()> {
     writer.write_all(&[0x47, 0x50])?; // Magic number
     writer.write_all(&[

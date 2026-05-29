@@ -4,7 +4,7 @@ LINKS SOMAの各操作を体験するためのデータです。東京都千代�
 
 サンプルデータを利用する際は、「関東地方」版のアプリをご利用ください。
 
-[データをダウンロード](https://storage.googleapis.com/links-soma/example/R6%E3%82%B5%E3%83%B3%E3%83%95%E3%82%9A%E3%83%AB%E3%83%86%E3%82%99%E3%83%BC%E3%82%BF.zip)（36.9MB）
+[データをダウンロード](https://storage.googleapis.com/links-soma/example/%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E3%83%87%E3%83%BC%E3%82%BF.zip)（36.9MB）
 
 ### データの中身
 
@@ -16,5 +16,4 @@ LINKS SOMAの各操作を体験するためのデータです。東京都千代�
 - 登記.csv
 - 建物ポリゴンデータ（PLATEAU）.gpkg
 - ジオコーディング済データ.csv
-
 

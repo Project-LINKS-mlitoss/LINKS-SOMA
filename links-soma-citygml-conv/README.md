@@ -14,7 +14,7 @@ npm install
 
 ### RUN dev
 ```
-npx tauri dev
+RUST_BACKTRACE=1 npx tauri dev
 ```
 
 ## Build

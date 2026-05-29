@@ -13,8 +13,8 @@ const config: ForgeConfig = {
     extraResource: [
       "../ml/dist",
       "drizzle",
-      "../app/dummy-data",
       "../app/public/basemap.pmtiles",
+      "../app/public/prepared-models",
     ],
     name: "LINKS_SOMA",
     win32metadata: {

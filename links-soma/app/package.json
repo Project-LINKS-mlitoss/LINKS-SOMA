@@ -8,15 +8,26 @@
   "main": ".vite/build/main.js",
   "scripts": {
     "dev": "electron-forge start",
-    "package": "npm run rebuild && npm exec electron-forge package",
     "make": "npm run rebuild && npm exec electron-forge make",
+    "package": "npm run rebuild && npm exec electron-forge package",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
+
     "lint": "npm run lint:eslint && npm run lint:type",
     "lint:eslint": "eslint --ext .ts,.tsx .",
     "lint:type": "tsc --noEmit --project tsconfig.base.json",
     "gen:migration": "drizzle-kit generate",
+
     "test:unit": "vitest",
-    "test:e2e": "playwright test"
+    "e2e:check-dev": "curl -sf http://localhost:5173 > /dev/null || (echo 'ERROR: dev server not running. Start it with: npm run dev' && exit 1)",
+    "e2e": "npm run e2e:check-dev && E2E_DEV_MODE=true playwright test",
+    "e2e:built": "playwright test",
+    "e2e:help": "node scripts/list-tests.js e2e",
+    "script": "E2E_DEV_MODE=true playwright test -c playwright.script.config.ts",
+    "script:built": "playwright test -c playwright.script.config.ts",
+    "script:help": "node scripts/list-tests.js script",
+
+    "ipc:snapshot": "tsx scripts/verify-ipc-channels.ts snapshot",
+    "ipc:verify": "tsx scripts/verify-ipc-channels.ts verify"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.4.0",
@@ -38,6 +49,7 @@
     "@types/geojson": "^7946.0.14",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
+    "@types/react-window": "^1.8.8",
     "@types/shpjs": "^3.4.7",
     "@types/unzipper": "^0.10.10",
     "@typescript-eslint/eslint-plugin": "^8.7.0",
@@ -64,11 +76,13 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.2.9",
-    "react-hook-form": "^7.52.1",
+    "react-hook-form": "^7.55.0",
     "react-router-dom": "^6.24.1",
+    "react-window": "^1.8.11",
     "recharts": "^2.13.0-alpha.4",
     "shpjs": "^4.0.1",
     "swr": "^2.2.5",
+    "ts-morph": "^27.0.2",
     "ts-node": "^10.0.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4",

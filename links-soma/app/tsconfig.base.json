@@ -42,6 +42,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    "**/*.json",
     "package.json",
     "assets/protomaps-basemaps.json"
   ]

@@ -1,0 +1,91 @@
+"""統合テスト共通フィクスチャ
+
+全インタフェース（IF001〜IF005）が使用するテスト用DBスキーマを提供する。
+各テストは必要なテーブルだけ使用し、不要なテーブルは無視してよい。
+"""
+
+import sqlite3
+
+import pytest
+
+
+@pytest.fixture()
+def test_db(tmp_path):
+    """テスト用SQLiteデータベースを作成して返す
+
+    全インタフェースが必要とするテーブルのスーパーセット:
+    - jobs: ジョブ管理
+    - job_tasks: タスク進捗・エラー記録
+    - job_results: 出力ファイル登録
+    - data_set_results: 結果メタデータ
+    - data_set_detail_buildings: 建物単位推定結果
+    - data_set_detail_areas: 地域単位集計結果
+    """
+    db_path = str(tmp_path / "test.db")
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            status TEXT,
+            type TEXT,
+            parameters TEXT,
+            process_id INTEGER,
+            is_named INTEGER
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE job_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            progress_percent TEXT,
+            preprocess_type TEXT,
+            error_code TEXT,
+            error_msg TEXT,
+            result TEXT,
+            finished_at TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE job_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            file_path TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE data_set_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            job_id INTEGER
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE data_set_detail_buildings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_set_result_id INTEGER,
+            reference_date TEXT,
+            building_id TEXT,
+            building_structure_type TEXT,
+            predicted_label INTEGER,
+            predicted_probability REAL,
+            lat_geocoding REAL,
+            lon_geocoding REAL,
+            normalized_address TEXT,
+            bldg_geometry TEXT
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE data_set_detail_areas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            data_set_result_id INTEGER,
+            reference_date TEXT,
+            vacant_house_count INTEGER,
+            predicted_probability REAL,
+            area_group TEXT,
+            geometry TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+    return db_path

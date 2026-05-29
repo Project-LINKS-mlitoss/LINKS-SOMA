@@ -1,5 +1,6 @@
 import path from "path";
 import { existsSync, mkdirSync, writeFile } from "fs";
+import { mainProcessLogger } from "../shared/utils/main-process-logger";
 import { type IpcMainListener } from ".";
 
 export const saveFile = ((
@@ -26,9 +27,12 @@ export const saveFile = ((
   const filePath = path.resolve(folderPath, fileName);
   writeFile(filePath, buffer, (err) => {
     if (err) {
-      console.error("ファイルの保存中にエラーが発生しました:", err);
+      mainProcessLogger.error(
+        "ファイルの保存中にエラーが発生しました",
+        err as Error,
+      );
     } else {
-      console.info("ファイルが正常に保存されました:", filePath);
+      mainProcessLogger.info(`ファイルが正常に保存されました: ${filePath}`);
     }
   });
 }) satisfies IpcMainListener;

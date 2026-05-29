@@ -3,8 +3,8 @@ import {
   data_set_detail_buildings,
   type SelectDataSetDetailBuilding,
   type SelectDataSetResult,
-} from "../schema";
-import { db } from "../utils/db";
+} from "../db/schema";
+import { db } from "../db/client";
 import { type IpcMainListener } from ".";
 
 export type ReferenceDate = SelectDataSetDetailBuilding["reference_date"];

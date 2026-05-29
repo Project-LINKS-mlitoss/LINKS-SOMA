@@ -1,10 +1,12 @@
 import { spawn } from "child_process";
-import { dbDirectory, dbPath } from "../../utils/db";
+import { dbDirectory, dbPath } from "../../db/client";
 import { binaryPath, type IpcMainListener } from "..";
-import { getErrorMessage } from "../../utils/get-error-message";
-import { processLogger } from "../../utils/process-logger";
-import { type ExportParameters } from "../../@types/job-parameters";
+import { mainProcessLogger } from "../../shared/utils/main-process-logger";
+import { setupMLProcessHandlers } from "../../shared/utils/ml-process-handler";
+import { type ExportParameters } from "../../shared/types/job-parameters";
+import { startJobProcess } from "./_start-job-process";
 
+/** IF004:データ出力機能の呼び出し */
 export const exportData = (async (
   _: unknown,
   params: {
@@ -13,12 +15,21 @@ export const exportData = (async (
 ): Promise<boolean> => {
   const { data } = params;
 
-  // eslint-disable-next-line no-console -- for debug @todo remove
-  console.log("--- start exportData ---", data);
-
   try {
-    const output_path = dbDirectory;
-    const database_path = dbPath;
+    const baseParameters = {
+      ...data,
+      output_path: dbDirectory,
+      database_path: dbPath,
+    };
+
+    const jobProcess = await startJobProcess({
+      jobType: "export",
+      parameters: baseParameters,
+    });
+
+    if (jobProcess.status !== "success") {
+      throw new Error("Job process start failed");
+    }
 
     // childProcessに入れてバックグラウンド実行
     const cp = spawn(
@@ -27,9 +38,8 @@ export const exportData = (async (
         "--parameters",
         JSON.stringify(
           JSON.stringify({
-            ...data,
-            output_path,
-            database_path,
+            ...baseParameters,
+            job_id: jobProcess.data.jobId,
           }),
         ),
       ],
@@ -38,11 +48,11 @@ export const exportData = (async (
       },
     );
 
-    processLogger(cp);
+    setupMLProcessHandlers(cp, jobProcess.data.jobId);
 
     return true;
   } catch (error) {
-    console.error(getErrorMessage(error));
-    return false;
+    mainProcessLogger.error("Export data process failed", error as Error);
+    throw new Error("Export data process failed");
   }
 }) satisfies IpcMainListener;

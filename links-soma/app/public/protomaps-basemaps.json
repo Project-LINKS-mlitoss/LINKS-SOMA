@@ -1374,7 +1374,11 @@
       "source": "protomaps",
       "source-layer": "water",
       "minzoom": 13,
-      "filter": ["in", "kind", "river", "stream"],
+      "filter": [
+        "all",
+        ["in", "kind", "river", "stream"],
+        ["!in", "name", "大溪/双溪", "小渓/小西溪", "尾瀧溪/西溪", "道安溪/龙头溪"]
+      ],
       "layout": {
         "symbol-placement": "line",
         "text-font": ["Noto Sans Italic"],
@@ -2927,7 +2931,8 @@
             ]
           ]
         ],
-        [">=", ["zoom"], ["+", ["get", "min_zoom"], 0]]
+        [">=", ["zoom"], ["+", ["get", "min_zoom"], 0]],
+        ["!", ["match", ["get", "name"], ["奈良原岳/高华峰", "屏風岳/神农峰", "三尊岩/孔明石", "拳头岭/拳頭嶺", "新田立岩/拇指峰", "狮峰/獅峰", "系缆石", "莲花石/蓮花石", "赤坎岭", "鹰峰/鷹峰", "黄毛峰"], true, false]]
       ],
       "layout": {
         "icon-image": [

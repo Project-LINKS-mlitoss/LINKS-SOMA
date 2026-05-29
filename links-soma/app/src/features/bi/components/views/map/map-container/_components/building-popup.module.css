@@ -1,0 +1,344 @@
+/* makeStylesだとスタイルが崩れるため、CSS Modulesを使う */
+
+.container {
+  margin: -15px -10px;
+  background-color: white;
+  border-radius: inherit;
+  min-width: 340px;
+  max-width: 600px;
+  width: 100%;
+}
+
+.header {
+  background-color: #1b8c631f;
+  padding: 20px 16px 12px;
+  display: flex;
+  gap: 8px;
+}
+
+.circleIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.close {
+  position: absolute;
+  font-size: 24px;
+  top: 15px;
+  right: 15px;
+  cursor: pointer;
+  color: #8a8a8a;
+}
+
+.predictedProbability {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.address {
+  color: #666;
+  font-size: 12px;
+}
+
+.info {
+  padding: 12px 20px 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.info > div {
+  width: calc(50% - 12px);
+}
+
+.heading {
+  color: #333;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.item {
+  display: flex;
+  justify-content: space-between;
+  gap: 0 4px;
+  max-width: 100%;
+  font-size: 12px;
+  border-bottom: 1px solid #e0e0e0;
+  padding: 2px 0;
+  flex-wrap: wrap;
+}
+
+.itemLabel {
+  color: #8a8a8a;
+  flex-shrink: 0;
+}
+
+.itemValue {
+  color: #242424;
+  overflow-wrap: anywhere;
+}
+
+.square {
+  width: 24px;
+  height: 24px;
+  margin-right: 10px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.householdIcon {
+  background-color: #0c6c0e;
+}
+
+.waterIcon {
+  background-color: #3693ea;
+}
+
+.buildingIcon {
+  background-color: #df7324;
+}
+
+.low {
+  color: #1b8c63;
+  background-color: #1b8c631f;
+}
+
+.low > span {
+  background-color: #1b8c63;
+}
+
+.medium {
+  color: #ffa929;
+  background-color: #ffa9291f;
+}
+
+.medium > span {
+  background-color: #ffa929;
+}
+
+.high {
+  color: #c4314b;
+  background-color: #c4314b1f;
+}
+
+.high > span {
+  background-color: #c4314b;
+}
+
+/* 全項目表示モード用のスタイル */
+.allColumnsContainer {
+  padding: 12px 20px 20px;
+  max-height: 400px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: all 0.3s ease-in-out;
+}
+
+/* トグルボタンコンテナ */
+.toggleButtonContainer {
+  padding: 0 20px 20px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* トグルボタン */
+.toggleButton {
+  background-color: #f5f5f5;
+  color: #333;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 12px;
+}
+
+.toggleButton:hover {
+  background-color: #e8e8e8;
+  border-color: #ccc;
+}
+
+.toggleButton:active {
+  background-color: #ddd;
+}
+
+/* スライドアニメーション用の親コンテナ */
+.slideContainer {
+  position: relative;
+  width: 100%;
+  min-height: 262px;
+  overflow: hidden;
+}
+
+/* スライドアニメーション用のラッパー */
+.slideWrapper {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  transition: transform 0.3s ease-in-out;
+}
+
+/* 家屋種別不明の警告表示 */
+.buildingTypeUnknown {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #616161;
+  margin-top: 2px;
+}
+
+.buildingTypeUnknown svg {
+  color: #a19f9d;
+}
+
+/* 重複レコードバナー */
+.overlapBanner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background-color: #f5f5f5;
+  border-left: 3px solid #757575;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 12px;
+}
+
+.overlapIcon {
+  color: #a19f9d;
+  flex-shrink: 0;
+}
+
+.overlapText {
+  color: #616161;
+  font-weight: 600;
+}
+
+.overlapHint {
+  color: #9e9e9e;
+  font-size: 11px;
+}
+
+/* 重複レコードナビゲーション */
+.overlapNavigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.overlapNavButton {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #424242;
+  transition: all 0.15s ease;
+  line-height: 1.2;
+}
+
+.overlapNavButton:hover:not(:disabled) {
+  background: #f5f5f5;
+  border-color: #bdbdbd;
+}
+
+.overlapNavButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.overlapNavIndicator {
+  color: #616161;
+  font-size: 12px;
+  font-weight: 500;
+  min-width: 48px;
+  text-align: center;
+}
+
+/* 上限警告 */
+.overlapLimitWarning {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 16px 4px;
+  background-color: #fafafa;
+  border-left: 3px solid #757575;
+  border-bottom: 1px solid #e0e0e0;
+  font-size: 11px;
+  color: #757575;
+}
+
+.overlapLimitWarning svg {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* 重複ツールチップ */
+.overlapTooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: help;
+}
+
+.overlapInfoIcon {
+  color: #9e9e9e;
+  font-size: 14px;
+}
+
+.overlapTooltip:hover .overlapInfoIcon {
+  color: #616161;
+}
+
+.overlapTooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background-color: #424242;
+  color: #fff;
+  font-size: 11px;
+  font-weight: normal;
+  padding: 6px 10px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.overlapTooltip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #424242;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.overlapTooltip:hover::after,
+.overlapTooltip:hover::before {
+  opacity: 1;
+  visibility: visible;
+}

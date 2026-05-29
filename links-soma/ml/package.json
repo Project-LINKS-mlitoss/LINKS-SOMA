@@ -2,6 +2,7 @@
   "name": "ml",
   "private": true,
   "scripts": {
-    "build": "node build.js"
+    "build": "node build.js",
+    "test": "poetry run pytest tests/ -v"
   }
 }

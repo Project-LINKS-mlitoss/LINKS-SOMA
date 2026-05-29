@@ -14,6 +14,7 @@ node_modules
 
 # Testing
 coverage
+.coverage
 
 # Turbo
 .turbo
@@ -44,3 +45,17 @@ __pycache__/
 ml/Gradio/E001_DataMatching/data/
 ml/Gradio/E002_Classification/data/
 ml/Gradio/E003_Summarization/data/
+
+#claude
+CLAUDE-*
+.claude/settings.local.json
+
+# Temporary files
+tmp/
+
+
+# Playwright MCP
+.playwright-mcp/
+
+# LP の zip 配布アーカイブ (成果物)
+lp.zip

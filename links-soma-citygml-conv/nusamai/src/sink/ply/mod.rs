@@ -2,25 +2,24 @@
 
 use std::{io::Write, path::PathBuf};
 
-use ahash::RandomState;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use earcut::{utils3d::project3d_to_2d, Earcut};
+use foldhash::fast::RandomState;
+use geocentric::geodetic_to_geocentric;
 use indexmap::IndexSet;
 use nusamai_citygml::{
     object::{ObjectStereotype, Value},
     schema::Schema,
     GeometryType,
 };
-use nusamai_projection::cartesian::geodetic_to_geocentric;
 use rayon::prelude::*;
 
 use crate::{
     get_parameter_value,
-    option::use_lod_config,
     parameters::*,
     pipeline::{Feedback, PipelineError, Receiver},
     sink::{DataRequirements, DataSink, DataSinkProvider, SinkInfo},
-    transformer::TransformerRegistry,
+    transformer::{use_lod_config, TransformerSettings},
 };
 
 use super::option::output_parameter;
@@ -55,9 +54,9 @@ impl DataSinkProvider for StanfordPlySinkProvider {
         params
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let mut settings: TransformerRegistry = TransformerRegistry::new();
-        settings.insert(use_lod_config("max_lod"));
+    fn transformer_options(&self) -> TransformerSettings {
+        let mut settings: TransformerSettings = TransformerSettings::new();
+        settings.insert(use_lod_config("max_lod", None));
 
         settings
     }
@@ -75,11 +74,11 @@ impl DataSinkProvider for StanfordPlySinkProvider {
 
 pub struct StanfordPlySink {
     output_path: PathBuf,
-    transform_settings: TransformerRegistry,
+    transform_settings: TransformerSettings,
 }
 
 impl DataSink for StanfordPlySink {
-    fn make_requirements(&mut self, properties: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, properties: TransformerSettings) -> DataRequirements {
         let default_requirements = DataRequirements::default();
 
         for config in properties.configs.iter() {
@@ -134,8 +133,13 @@ impl DataSink for StanfordPlySink {
                                         let [lng, lat, height] = geom_store.vertices[*idx as usize];
                                         // Convert to geocentric (x, y, z) coordinate.
                                         // (Earcut do not work in geographic space)
-                                        let (x, y, z) =
-                                            geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                                        let (x, y, z) = geodetic_to_geocentric(
+                                            ellipsoid.a(),
+                                            ellipsoid.e_sq(),
+                                            lng,
+                                            lat,
+                                            height,
+                                        );
                                         [x, y, z]
                                     });
                                     let num_outer = match poly.hole_indices().first() {

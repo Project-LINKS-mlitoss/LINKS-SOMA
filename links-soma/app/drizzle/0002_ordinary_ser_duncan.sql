@@ -1,0 +1,1 @@
+ALTER TABLE `data_set_detail_buildings` ADD `optional_data_source` text;

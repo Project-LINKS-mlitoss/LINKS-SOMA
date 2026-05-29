@@ -20,14 +20,25 @@ export const ApiInput = (): JSX.Element => {
   const styles = useStyles();
   const {
     register,
+    watch,
     formState: { errors, touchedFields },
   } = useFormContext();
 
+  const apiType = watch('apiType');
   const hasError = Boolean(errors.apiToken && touchedFields.apiToken);
+
+  // Hide input field for ABR (data is pre-downloaded, no token needed)
+  if (apiType === 'abr') {
+    return <></>;
+  }
+
+  // Determine label and placeholder based on API type
+  const title = apiType === 'ntt' ? 'APIのappid' : 'APIトークン';
+  const placeholder = apiType === 'ntt' ? 'APIのappidを入力' : 'APIキーを入力';
 
   return (
     <Card>
-      <div className={styles.title}>APIトークン</div>
+      <div className={styles.title}>{title}</div>
       <Field
         validationState={hasError ? 'error' : undefined}
         validationMessage={
@@ -38,8 +49,10 @@ export const ApiInput = (): JSX.Element => {
       >
         <Input
           className={styles.input}
-          placeholder="APIキーを入力"
-          {...register('apiToken', { required: 'この項目は必須です' })}
+          placeholder={placeholder}
+          {...register('apiToken', { 
+            required: apiType === 'abr' ? false : 'この項目は必須です' 
+          })}
         />
       </Field>
     </Card>

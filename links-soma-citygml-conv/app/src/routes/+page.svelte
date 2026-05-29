@@ -3,7 +3,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { attachConsole } from '@tauri-apps/plugin-log';
 	import type { SinkParameters } from '$lib/sinkparams';
-	import type { TransformerRegistry } from '$lib/transformer';
+	import type { TransformerSettings } from '$lib/transformer';
 
 	import Icon from '@iconify/svelte';
 	import InputSelector from './InputSelector.svelte';
@@ -23,7 +23,8 @@
 	let isConvertButtonDisabled = true;
 
 	$: isConvertButtonDisabled = !inputPaths.length || !outputPath || isRunning;
-	let transformerRegistry: TransformerRegistry;
+	let transformerSettings: TransformerSettings;
+
 
 	async function convertAndSave() {
 		isRunning = true;
@@ -35,7 +36,7 @@
 				filetype,
 				epsg,
 				rulesPath,
-				transformerRegistry,
+				transformerSettings,
 				sinkParameters
 			});
 
@@ -72,7 +73,7 @@
 			bind:epsg
 			bind:rulesPath
 			bind:sinkParameters
-			bind:transformerRegistry
+			bind:transformerSettings
 		/>
 
 		<OutputSelector {filetype} bind:outputPath />

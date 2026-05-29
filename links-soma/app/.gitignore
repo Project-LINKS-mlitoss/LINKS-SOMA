@@ -103,3 +103,6 @@ playwright-report/
 # 個人情報が入ったデータが含まれないようにignore
 assets/*.csv
 assets/*.zip
+
+# E2Eテスト用サンプルデータ（大容量ファイルのみ除外）
+src/tests/fixtures/*.gpkg

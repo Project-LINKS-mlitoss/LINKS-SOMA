@@ -1,5 +1,5 @@
 {
-  "name": "LINKS SOMA",
+  "name": "links-soma",
   "private": true,
   "scripts": {
     "build": "turbo build",
@@ -7,7 +7,9 @@
     "lint": "turbo lint",
     "make": "turbo make",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "prepare": "husky"
+    "prepare": "husky",
+    "db:node-rebuild": "npm rebuild better-sqlite3",
+    "db:electron-rebuild": "electron-rebuild -f -w better-sqlite3 -v $(npx electron --version)"
   },
   "devDependencies": {
     "@typescript-eslint/parser": "^8.7.0",

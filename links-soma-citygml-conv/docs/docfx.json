@@ -2,8 +2,8 @@
 	"metadata": [],
 	"build": {
 		"globalMetadata": {
-			"_appTitle": "LINKS SOMA CityGML Converter",
-			"_appFooter": "LINKS SOMA CityGML Converter",
+			"_appTitle": "PLATEAU GIS Converter",
+			"_appFooter": "PLATEAU GIS Converter",
 			"_enableSearch": true
 		},
 		"content": [

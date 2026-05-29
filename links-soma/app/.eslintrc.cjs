@@ -81,7 +81,7 @@ module.exports = {
     "import-x/no-named-as-default": "off",
     "eslint-comments/require-description": "error",
     "object-shorthand": "warn",
-    "no-console": ["error", { allow: ["info", "error", "warn"] }],
+    "no-console": "error",
   },
   overrides: [
     {

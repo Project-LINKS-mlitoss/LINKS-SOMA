@@ -3,113 +3,149 @@
 判定用データをインプットとして建物単位で空き家を確率的に判定するための分類用機械学習アルゴリズム（トレーニング済み）を実行する機能。
 """
 
+import argparse
+import chardet
+import gc
 import json
 import os
-import pickle
 import shutil
 import sys
-import uuid
-import chardet
-import zipfile 
-import numpy as np
-import pandas as pd
-import re
 import time
-import gc
+import traceback
+import uuid
+import zipfile
+from typing import Optional
+from pathlib import Path
+
+import lightgbm as lgb
+import pandas as pd
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-async_tasks_path = os.path.join(current_dir, '..', 'async_tasks')
+async_tasks_path = os.path.join(current_dir, "..", "async_tasks")
 if async_tasks_path not in sys.path:
     sys.path.append(async_tasks_path)
 
 try:
-    from utils import *
-    from constants import *
+    from utils import (
+        connect_sqllite,
+        create_or_update_job,
+        create_or_update_job_task,
+        create_data_set_detail_buildings_or_area,
+        get_rotating_logger,
+    )
+    from constants import (
+        ERROR_20007,
+        ERROR_20008,
+        MAPPING_E022_TO_IF001,
+        COLUMNS_TO_LEARN,
+    )
 except ImportError:
     sys.path.remove(async_tasks_path)
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
-    from async_tasks.utils import *
-    from async_tasks.constants import *
+    sys.path.append(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+    )
+    from async_tasks.utils import (
+        connect_sqllite,
+        create_or_update_job,
+        create_or_update_job_task,
+        create_data_set_detail_buildings_or_area,
+        get_rotating_logger,
+    )
+    from async_tasks.constants import (
+        ERROR_20007,
+        ERROR_20008,
+        MAPPING_E022_TO_IF001,
+        COLUMNS_TO_LEARN,
+    )
 
 
-# pandasの表示オプションを設定
-pd.set_option('display.max_columns', None)
+ERROR_CODE = None
+ERROR_MSG = None
 
-ERROR_CODE=None
-ERROR_MSG=None
 
-def detect_encoding(file_path):
+def detect_encoding(file_path: str) -> str:
     """
-    ファイルのエンコーディングを検出する
+    Detects the encoding of a file.
+    ファイルのエンコーディングを検出します。
 
     Parameters
     ----------
     file_path : str
-        検出対象のファイルパス
+        The path of the file to detect.
+        検出対象のファイルパス。
 
     Returns
     -------
     encoding : str
-        検出されたエンコーディング
+        The detected encoding.
+        検出されたエンコーディング。
     """
-    # ファイルの内容を読み込む
-    with open(file_path, 'rb') as file:
-        raw_data = file.read(100)
-    # エンコーディングを検出して返す
+    try:
+        # ファイルの内容を読み込む
+        with open(file_path, "rb") as file:
+            raw_data = file.read(100)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"File not found: {file_path} / ファイルが見つかりません: {file_path}"
+        )
+    except IOError as e:
+        raise IOError(
+            f"Error reading file: {file_path}, {e} / ファイルの読み込み中にエラーが発生しました: {file_path}, {e}"
+        )
+
     result = chardet.detect(raw_data)
-    return result['encoding']
+    encoding = result["encoding"]
+    if not encoding:
+        raise ValueError(
+            f"Could not detect encoding for file: {file_path} / ファイルのエンコーディングを検出できませんでした: {file_path}"
+        )
+    return encoding
+
 
 def read_csv(path: str) -> pd.DataFrame:
     """
-    CSVファイルを読み込む
+    Reads a CSV file.
+    CSVファイルを読み込みます。
 
     Parameters
     ----------
     path : str
-        読み込むファイルのパス
+        The path of the file to read.
+        読み込むファイルのパス。
 
     Returns
     -------
     pd.DataFrame
-        読み込まれたデータフレーム、エラー時はNone
+        The loaded DataFrame.
+        読み込まれたデータフレーム。
     """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"File not found: {path} / ファイルが見つかりません: {path}"
+        )
+    if not path.lower().endswith(".csv"):
+        raise ValueError(
+            f"Not a CSV file: {path} / CSVファイルではありません: {path}"
+        )
+
     try:
-        # ファイルの拡張子を取得し、小文字に変換
-        file_extension = os.path.splitext(path)[1].lower()
+        encode = detect_encoding(path)
+        df = pd.read_csv(path, encoding=encode)
+        if df.empty:
+            print(
+                f"Warning: The loaded CSV file is empty: {path} / 警告: 読み込まれたCSVファイルが空です: {path}"
+            )
+        return df
+    except (UnicodeDecodeError, pd.errors.ParserError) as e:
+        raise IOError(
+            f"Failed to read or parse CSV file: {path}. Error: {e} / CSVファイルの読み込みまたは解析に失敗しました: {path}. エラー: {e}"
+        )
 
-        # CSVファイル以外の場合はエラーを発生させる
-        if file_extension != '.csv':
-            set_error(ERROR_20001)
-            raise ValueError(f"CSVファイル以外は対応していません: {file_extension}")
-
-        # 複数のエンコーディングを試行
-        encodings = ['utf-8-sig']
-        for encoding in encodings:
-            try:
-                # 各エンコーディングでファイルの読み込みを試みる
-                return pd.read_csv(path, encoding=encoding)
-            except UnicodeDecodeError:
-                # デコードエラーが発生した場合、次のエンコーディングを試す
-                continue
-
-        # 自動でエンコーディングを検出し、再度読み込みを試みる
-        detected_encoding = detect_encoding(path)
-        if detected_encoding:
-            return pd.read_csv(path, encoding=detected_encoding)
-
-        # 適切なエンコーディングが見つからない場合、エラーを発生させる
-        set_error(ERROR_20002)
-        raise ValueError(f"適切なエンコーディングが見つかりませんでした: {path}")
-    except Exception as e:
-        # 何らかの例外が発生した場合、エラーメッセージを表示してNoneを返す
-        if ERROR_CODE is None:
-            set_error(ERROR_20003, path)
-        raise
 
 def extract_zip(zip_file, extract_to):
     """
     zipファイルを解凍し、解凍されたファイルのパスを返す関数。
-    
+
     Parameters:
     -----------
     zip_file : str
@@ -124,130 +160,517 @@ def extract_zip(zip_file, extract_to):
     """
     with zipfile.ZipFile(zip_file, 'r') as zip_ref:
         zip_ref.extractall(extract_to)
-    files = os.listdir(extract_to)
-    model_files = [os.path.join(extract_to, f) for f in files if f.endswith(".pkl")]
-    return model_files
+    return extract_to
 
-def load_models(model_zip, job_id):
+
+def load_models(model_zip):
     """
-    ディレクトリ内のpickleファイルから訓練済みモデルを読み込む
+    ZIPファイルからモデルを読み込む。
+    新形式（joblib PU Bagging）と旧形式（LightGBM txt）の両方に対応。
 
     Parameters
     ----------
-    directory : str
-        モデルファイルが格納されているディレクトリへのパス
+    model_zip : str
+        モデルZIPファイルへのパス
+
+    Returns
+    -------
+    dict or lgb.Booster
+        新形式: {"models": [...], "feat_cols": [...], "recall_target": float, ...}
+        旧形式: lgb.Booster
+    """
+    import joblib
+
+    temp_dir = os.path.join(os.getcwd(), str(uuid.uuid4()))
+    os.makedirs(temp_dir, exist_ok=True)
+    extract_zip(model_zip, temp_dir)
+
+    # 新形式: model.pkl (joblib)
+    pkl_path = os.path.join(temp_dir, "model.pkl")
+    if os.path.exists(pkl_path):
+        artifact = joblib.load(pkl_path)
+        _cleanup_temp(temp_dir)
+        return artifact
+
+    # 旧形式: .txt (LightGBM Booster)
+    txt_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if f.endswith(".txt")]
+    if txt_files:
+        with open(txt_files[0], "r", encoding="utf-8") as f:
+            model_str = f.read()
+        model = lgb.Booster(model_str=model_str)
+        _cleanup_temp(temp_dir)
+        return model
+
+    _cleanup_temp(temp_dir)
+    raise FileNotFoundError("モデルファイルが見つかりません（model.pkl または .txt）")
+
+
+def _cleanup_temp(temp_dir):
+    """一時ディレクトリを削除（リトライ付き）"""
+    gc.collect()
+    for _ in range(10):
+        try:
+            shutil.rmtree(temp_dir)
+            break
+        except PermissionError:
+            time.sleep(0.5)
+
+
+def get_needed_explanatory_columns_list(model) -> list:
+    """
+    学習に使用した説明変数カラム一覧を取得する。
+    新形式（PU Bagging dict）と旧形式（Booster/LGBMClassifier）の両方に対応。
+
+    Parameters
+    ----------
+    model : dict or lgb.Booster or lgb.LGBMClassifier
+        訓練済みモデル。
 
     Returns
     -------
     list
-        読み込まれた訓練済みモデルのリスト
+        学習に使用したカラム名のリスト。
     """
-    # 一時ディレクトリを作成
-    if job_id is not None:
-        temp_dir = os.path.join(os.getcwd(), str(uuid.uuid4()))
-    else:
-        temp_dir = os.path.join(os.getcwd(), "temp_files")
+    if isinstance(model, dict) and "feat_cols" in model:
+        return model["feat_cols"]
+    return model.feature_name()
 
-    os.makedirs(temp_dir, exist_ok=True)
-    model_files = extract_zip(model_zip, temp_dir)
-    models = []
-    columns = []
-    for model_file in model_files:
-        # 各モデルファイルを読み込み、リストに追加
-        with open(model_file, 'rb') as f:
-            if model_file.endswith("_columns.pkl"):
-                columns = pickle.load(f)
-            else:
-                models.append(pickle.load(f))
 
-    gc.collect()
-    for _ in range(10):  # Try up to 10 times
+def prepare_for_estimation(
+    input_df: pd.DataFrame, explanatory_columns: list
+) -> pd.DataFrame:
+    """
+    Preprocesses the data for estimation.
+    予測用にデータを前処理します。
+
+    Parameters
+    ----------
+    input_df : pd.DataFrame
+        Input DataFrame.
+        入力データフレーム。
+    explanatory_columns : list
+        List of column names used for training.
+        学習に使用したカラム名のリスト。
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame of explanatory variables.
+        説明変数データフレーム。
+    """
+    df = input_df.copy()
+    if df.empty:
+        print("警告: 入力データフレームが空です。")
+        return pd.DataFrame(columns=explanatory_columns)
+
+    # 案1②全説明変数において変数ごとにisnullフラグをつける
+    for col in COLUMNS_TO_LEARN:
+        if col in df:
+            df[f'{col}_isnull'] = df[col].isnull().astype(int)
+
+    # カラムの過不足を確認
+    missing_cols = [
+        col for col in explanatory_columns if col not in df.columns
+    ]
+    if missing_cols:
+        df[missing_cols] = float("nan")
+        print(
+            f"Warning: Missing columns in the input data: {missing_cols}→Filled with Null / 警告: 入力データに不足しているカラムがあります: {missing_cols}→NAで埋めました"
+        )
+
+    # 必要なカラムのみを選択し、順序を学習時と合わせる
+    df = df[explanatory_columns]
+
+    return df
+
+
+def predict_akiya(
+    input_df: pd.DataFrame,
+    prepared_df: pd.DataFrame,
+    model,
+    thresh: float
+) -> pd.DataFrame:
+    """
+    学習済みモデルを使用して空き家予測を行う。
+    新形式（PU Bagging dict）と旧形式（Booster/LGBMClassifier）の両方に対応。
+
+    Parameters
+    ----------
+    input_df : pd.DataFrame
+        入力データフレーム。
+    prepared_df : pd.DataFrame
+        前処理されたデータフレーム。
+    model : dict or lgb.Booster or lgb.LGBMClassifier
+        学習済みモデル。
+    thresh : float
+        空き家と判定する確率の閾値。
+
+    Returns
+    -------
+    pd.DataFrame
+        予測結果を含むデータフレーム。
+    """
+    import numpy as np
+
+    df = input_df.copy()
+    prepared_df = prepared_df.copy()
+    if df.empty:
+        df["predicted_probability"] = pd.Series(dtype="float64")
+        df["predicted_label"] = pd.Series(dtype="int")
+        for threshold_percent in range(5, 96, 5):
+            df[f"predicted_label_{threshold_percent:02d}"] = pd.Series(dtype="int")
+        return df
+
+    # 新形式: PU Bagging（dict with "models" key）
+    if isinstance(model, dict) and "models" in model:
+        if "medians" in model:
+            # 学習時と同じNaN補完: median→0埋め + years_since_closure上限
+            medians = pd.Series(model["medians"])
+            ysc_cap = model.get("ysc_cap", 15.0)
+            filled = prepared_df.fillna(medians).fillna(0)
+            if "years_since_closure" in filled.columns:
+                filled["years_since_closure"] = filled["years_since_closure"].clip(upper=ysc_cap)
+            X = filled.to_numpy(dtype=float)
+        else:
+            # 旧モデル互換: mediansキーなければ従来動作
+            X = np.nan_to_num(prepared_df.to_numpy(dtype=float), nan=0.0)
+        y_pred_proba = np.mean(
+            [m.predict_proba(X)[:, 1] for m in model["models"]], axis=0
+        )
+    elif isinstance(model, lgb.LGBMClassifier):
+        y_pred_proba = model.predict_proba(prepared_df)[:, 1]
+    else:  # Booster
+        y_pred_proba = model.predict(prepared_df)
+
+    df["predicted_probability"] = y_pred_proba
+    df["predicted_label"] = (y_pred_proba > thresh).astype(int)
+
+    # 5%から95%まで5%刻みで閾値を設定
+    for threshold_percent in range(5, 96, 5):
+        threshold_value = threshold_percent / 100.0
+        df[f"predicted_label_{threshold_percent:02d}"] = (y_pred_proba > threshold_value).astype(int)
+
+    return df
+
+
+def save_predictions(df: pd.DataFrame, output_dir: str):
+    """
+    Saves the prediction results to a CSV file.
+    予測結果をCSVファイルに保存します。
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing the prediction results.
+        予測結果を含むデータフレーム。
+    output_dir : str
+        Path to the output directory.
+        出力ディレクトリのパス。
+    """
+    if not os.path.exists(output_dir):
         try:
-            shutil.rmtree(temp_dir)  # Attempt to delete the directory
-            break
-        except PermissionError:
-            time.sleep(0.5)  # Wait 0.5 seconds before retrying
+            os.makedirs(output_dir, exist_ok=True)
+            print(
+                f"Output directory created: {output_dir} / 出力ディレクトリを作成しました: {output_dir}"
+            )
+        except OSError as e:
+            raise IOError(
+                f"Failed to create output directory: {output_dir}. Error: {e} / 出力ディレクトリの作成に失敗しました: {output_dir}. エラー: {e}"
+            )
 
-    return models, columns
+    output_csv_path = os.path.join(output_dir, "predictions.csv")
+    try:
+        df.to_csv(output_csv_path, index=False, encoding="utf-8-sig")
+        print(
+            f"Prediction results saved to {output_csv_path}. / 予測結果が {output_csv_path} に保存されました。"
+        )
+    except IOError as e:
+        raise IOError(
+            f"Failed to save prediction results to file: {output_csv_path}. Error: {e} / 予測結果のファイル保存に失敗しました: {output_csv_path}. エラー: {e}"
+        )
 
-def check_features(new_data, required_features, outcome_variable):
+
+def main(
+    input_path: str,
+    model_path: str,
+    output_dir: str,
+    file_path: str,
+    thresh: float,
+    job_id: str,
+    db_path: str,
+    process: float,
+    data_set_result_id: int,
+    logs_dir: Optional[str] = None,
+):
     """
-    新しいデータに必要な特徴量が含まれているかチェックし、余分な特徴量を削除する
+    Main function to execute the vacant house prediction process.
+    空き家予測のプロセスを実行するメイン関数。
 
     Parameters
     ----------
-    new_data : pd.DataFrame
-        新しいデータを含むDataFrame
-    required_features : list
-        必要な特徴量名のリスト
-    outcome_variable : str
-        目的変数の名前
-
-    Returns
-    -------
-    tuple
-        (pd.DataFrame, bool, str) - (調整されたDataFrame, 特徴量が一致する場合True, 一致しない場合のエラーメッセージ)
+    input_path : str
+        Path to the input CSV file.
+        入力CSVファイルへのパス。
+    model_path : str
+        Path to the trained model file.
+        訓練済みモデルファイルへのパス。
+    output_dir : str
+        Path to the output directory.
+        出力ディレクトリのパス。
+    thresh : float
+        Probability threshold for classifying as a vacant house.
+        空き家と判定する確率の閾値。
     """
-    # 'geometry'列を必要な特徴量リストから除外
-    required_features_without_geometry = [feature for feature in required_features if feature != 'geometry']
-    all_required_features = required_features_without_geometry + [outcome_variable]
+    task_id = None
+    logger = None
 
-    # 新しいデータの特徴量を取得
-    new_data_features = new_data.columns.tolist()
-    missing_features = [feature for feature in all_required_features if feature not in new_data_features]
-    extra_features = [feature for feature in new_data_features if feature not in all_required_features and feature != 'geometry']
+    try:
+        if logs_dir:
+            logger = get_rotating_logger(logs_dir, logger_name="E022")
+        else:
+            logs_dir = os.path.join(output_dir, "logs")
+            logger = get_rotating_logger(logs_dir, logger_name="E022")
 
-    # 不足している特徴量と余分な特徴量を特定
-    if missing_features:
-        set_error(ERROR_20004, missing_features)
-        error_message = "学習に使用したデータと予測に使用するデータの列が一致しません!\n"
-        error_message += f"不足している特徴量: {missing_features}\n"
-        return new_data, False, error_message
+        logger.info(f"[params] input_path={input_path}")
+        logger.info(f"[params] model_path={model_path}")
+        logger.info(f"[params] output_dir={output_dir}, thresh={thresh}, job_id={job_id}")
 
-    if extra_features:
-        # 余分な特徴量がある場合、それらを削除
-        new_data = new_data.drop(columns=extra_features)
-        info_message = f"削除された余分な特徴量: {extra_features}\n"
-        return new_data, True, info_message
+        sqlite_enabled = False
+        if db_path:
+            try:
+                connect_sqllite(db_path)
+                process = process / 4
+                process_init = process
+                sqlite_enabled = True
+            except Exception as e:
+                print(
+                    f"SQLite接続に失敗しました: {e}. SQLiteを使用せずに続行します。"
+                )
+                if logger:
+                    logger.warning("E022 - SQLite接続に失敗しました: %s", traceback.format_exc())
+        if sqlite_enabled and job_id:
+            task_id = create_or_update_job_task(
+                job_id,
+                progress_percent="0",
+                preprocess_type=None,
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({}),
+            )
+            create_or_update_job(job_id, process)
+            process += process_init
+        # データの読み込み
+        df = read_csv(input_path)
+        if df.empty:
+            raise Exception("入力データが空です。")
+        if logger:
+            logger.info(f"[load_data] Loaded CSV: {len(df):,} rows x {len(df.columns)} cols")
+        # Remove rows where 水道番号 is null or empty
+        if "水道番号" in df.columns:
+            df = df[df["水道番号"].notna() & (df["水道番号"] != "")].reset_index(
+                drop=True
+            )
+            if logger:
+                logger.info(f"[load_data] After 水道番号 filter: {len(df):,} rows")
 
-    return new_data, True, ""
+        # モデルの読み込み
+        model = load_models(model_path)
+        if logger:
+            if isinstance(model, dict) and "models" in model:
+                logger.info(f"[load_model] Format: PU Bagging dict (keys={list(model.keys())})")
+                logger.info(f"[load_model] feat_cols: {model.get('feat_cols', [])}")
+                logger.info(f"[load_model] n_bags={len(model.get('models', []))}, "
+                             f"threshold={model.get('threshold', 'N/A')}, "
+                             f"recall_target={model.get('recall_target', 'N/A')}")
+            elif isinstance(model, lgb.LGBMClassifier):
+                logger.info("[load_model] Format: LGBMClassifier")
+            else:
+                logger.info(f"[load_model] Format: Booster (type={type(model).__name__})")
 
-def predict(models, new_data, required_features, threshold):
+        if sqlite_enabled and job_id:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="30",
+                preprocess_type=None,
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({}),
+                id=task_id,
+            )
+            create_or_update_job(job_id, process)
+            process += process_init
+
+        # カラム調整
+        explanatory_values = get_needed_explanatory_columns_list(model)
+        if logger:
+            logger.info(f"[prepare] Requested explanatory columns: {len(explanatory_values)}")
+            missing_cols = [c for c in explanatory_values if c not in df.columns]
+            if missing_cols:
+                logger.warning(f"[prepare] Missing columns (will be filled with NA): {missing_cols}")
+            present_cols = [c for c in explanatory_values if c in df.columns]
+            logger.info(f"[prepare] Present columns: {len(present_cols)}/{len(explanatory_values)}")
+        df_prepared = prepare_for_estimation(df, explanatory_values)
+
+        if sqlite_enabled and job_id:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="60",
+                preprocess_type=None,
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({}),
+                id=task_id,
+            )
+            create_or_update_job(job_id, process)
+            process += process_init
+
+        # 予測の実行
+        if logger:
+            logger.info(f"[predict] Running prediction with threshold={thresh}")
+        df_pred = predict_akiya(df, df_prepared, model, thresh)
+        if logger:
+            import numpy as _np
+            scores = df_pred.get("predicted_probability")
+            if scores is not None and len(scores) > 0:
+                logger.info(f"[predict] Score distribution: min={scores.min():.4f}, max={scores.max():.4f}, "
+                             f"mean={scores.mean():.4f}, median={scores.median():.4f}")
+                logger.info(f"[predict] Score percentiles: 25%={scores.quantile(0.25):.4f}, "
+                             f"75%={scores.quantile(0.75):.4f}, 90%={scores.quantile(0.90):.4f}, "
+                             f"95%={scores.quantile(0.95):.4f}")
+            labels = df_pred.get("predicted_label")
+            if labels is not None:
+                n_vacant = int(labels.sum())
+                logger.info(f"[predict] Label distribution: vacant={n_vacant:,} / "
+                             f"total={len(labels):,} ({n_vacant/max(1,len(labels)):.2%})")
+        columns_to_drop = []
+        for col in COLUMNS_TO_LEARN:
+            if col in df:
+                columns_to_drop.append(f'{col}_isnull')
+        df_prepared = df_prepared.drop(columns=columns_to_drop, errors='ignore')
+
+        if sqlite_enabled and job_id:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="60",
+                preprocess_type=None,
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({}),
+                id=task_id,
+            )
+            create_or_update_job(job_id, process)
+            process += process_init
+        if logger:
+            logger.info(f"[output] Final dataframe: {len(df_pred):,} rows x {len(df_pred.columns)} cols")
+
+        if sqlite_enabled and job_id:
+            # Insert SQLite data
+            insert_sqlite(df_pred, data_set_result_id)
+            # E032が参照するCSVにreference_dateを含める
+            # （insert_sqlite内でローカル変数に再バインドされるためdf_predには反映されない）
+            if "reference_date" not in df_pred.columns:
+                df_pred["reference_date"] = ""
+            # 各エンコーディングでCSVファイルとして保存を試みる
+            os.makedirs(output_dir, exist_ok=True)
+            df_pred.to_csv(file_path, index=False, encoding='utf-8-sig')
+        else:
+            # 予測結果の保存
+            save_predictions(df_pred, output_dir)
+        if sqlite_enabled and job_id:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="100",
+                preprocess_type=None,
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({}),
+                id=task_id,
+                is_finish=True,
+            )
+            create_or_update_job(job_id, process)
+    except Exception as e:
+        print(f"An error occurred: {e} / エラーが発生しました: {e}")
+        if logger:
+            logger.error("E022 failed:\n%s", traceback.format_exc())
+        if task_id is not None:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="",
+                preprocess_type=None,
+                error_code=ERROR_CODE,
+                error_msg=ERROR_MSG,
+                result=json.dumps({}),
+                id=task_id,
+                is_finish=True,
+            )
+        if ERROR_CODE is None:
+            set_error(ERROR_20008)
+            raise Exception(e)
+        raise Exception(e)
+        # 必要に応じて sys.exit(1) などでプログラムを終了させる
+
+
+def set_error(value: dict, param_st1: str = None, param_st2: str = None):
     """
-    訓練済みモデルを使用して予測を行う
+    Sets the error code and message.
+    エラーコードとメッセージを設定します。
 
     Parameters
     ----------
-    models : list
-        訓練済みモデルのリスト
-    new_data : pd.DataFrame
-        新しいデータを含むDataFrame
-    required_features : list
-        必要な特徴量名のリスト
-    threshold : float
-        二値分類の閾値
-
-    Returns
-    -------
-    tuple
-        (np.array, np.array) - (二値予測結果, 予測確率)
+    value : dict
+        The error code and message. / エラーコードとメッセージ。
+    param_st1 : str
+        The first parameter. / 最初のパラメータ。
+    param_st2 : str
+        The second parameter. / 第二のパラメータ。
     """
-    # 予測に使用する特徴量を選択
-    X_pred = new_data[required_features]
+    global ERROR_CODE
+    global ERROR_MSG
+    ERROR_CODE = value["code"]
+    if param_st1 is not None and param_st2 is not None:
+        ERROR_MSG = value["message"].format(
+            param_st1=param_st1,
+            param_st2=param_st2,
+        )
+    elif param_st1 is not None:
+        ERROR_MSG = value["message"].format(param_st1=param_st1)
+    else:
+        ERROR_MSG = value["message"]
 
-    categorical_features = X_pred.select_dtypes(include=["object"]).columns.tolist()
-    for col in categorical_features:
-        X_pred[col] = X_pred[col].astype("category")
 
-    # 各モデルの予測確率の平均を計算
-    test_preds_proba = np.mean([model.predict_proba(X_pred)[:, 1] for model in models], axis=0)
+ODS_SUFFIX = "_ods"
 
-    # 閾値を適用して二値予測を行う
-    test_preds = (test_preds_proba >= threshold).astype(int)
 
-    return test_preds, test_preds_proba
+def collect_ods_to_json(df: pd.DataFrame) -> pd.DataFrame:
+    """_odsサフィックスのカラムをoptional_data_source JSON文字列に変換する。
 
-def insert_sqlite(input_data, data_set_result_id):
+    _odsカラムが存在しなければそのまま返す。
+    存在すれば_odsカラムを除去し、optional_data_sourceカラムを追加する。
+    """
+    ods_cols = sorted([c for c in df.columns if c.endswith(ODS_SUFFIX)])
+    if not ods_cols:
+        return df
+
+    # カラム名からサフィックスを除いた表示名を事前計算
+    ods_names = [col[: -len(ODS_SUFFIX)] for col in ods_cols]
+    col_indices = [df.columns.get_loc(col) for col in ods_cols]
+
+    # itertuples + 位置アクセスで行ごとのJSON文字列を生成（df.applyより高速）
+    json_values = []
+    for tup in df.itertuples(index=False, name=None):
+        entries = [
+            {"name": name, "value": None if pd.isna(tup[idx]) else tup[idx]}
+            for name, idx in zip(ods_names, col_indices)
+        ]
+        json_values.append(json.dumps(entries, ensure_ascii=False))
+
+    df = df.copy()
+    df["optional_data_source"] = json_values
+    df = df.drop(columns=ods_cols)
+    return df
+
+
+def insert_sqlite(input_data: pd.DataFrame, data_set_result_id: int):
     """
     指定されたデータをSQLiteデータベースに挿入し、同時にインポート可能な形式でファイルを出力する
 
@@ -255,326 +678,128 @@ def insert_sqlite(input_data, data_set_result_id):
     ----------
     input_data : pd.DataFrame
         SQLiteデータベースに挿入し、ファイル出力するデータを含むDataFrame
-    Raises
-    ------
-    Exception
-        データベースにデータを挿入またはファイル出力する際にエラーが発生した場合に例外を発生させる
+    data_set_result_id : int
+        data_set_result_idを設定する
     """
-
     try:
-        # カラム名のマッピング
-        mapping_header = {
-            'data_set_result_id': 'data_set_result_id',
-            '世帯コード': 'household_code',
-            '正規化住所': 'normalized_address',
-            'reference_date': 'reference_date',
-            '世帯人数': 'household_size',
-            '最大年齢': 'max_age',
-            '最小年齢': 'min_age',
-            '水道使用量変化率_suido_residence': 'change_ratio_water_usage',
-            '15歳未満人数': 'members_under_15',
-            '15歳未満構成比': 'percentage_under_15',
-            '15歳以上64歳以下人数': 'members_15_to_64',
-            '15歳以上64歳以下構成比': 'percentage_15_to_64',
-            '65歳以上人数': 'members_over_65',
-            '65歳以上構成比': 'percentage_over_65',
-            '男女比': 'gender_ratio',
-            '住定期間': 'residence_duration',
-            '水道番号_suido_residence': 'water_supply_number',
-            '閉栓フラグ_suido_residence': 'water_disconnection_flag',
-            '最大使用水量_suido_residence': 'max_water_usage',
-            '平均使用水量_suido_residence': 'avg_water_usage',
-            '合計使用水量_suido_residence': 'total_water_usage',
-            '最小使用水量_suido_residence': 'min_water_usage',
-            '名寄せ元情報_suido_residence': 'water_supply_source_info',
-            '構造名称_touki_residence': 'structure_name',
-            '登記日付_touki_residence': 'registration_date',
-            '名寄せ元情報_touki_residence': 'registration_source_info',
-            '住所_akiya_result_cleaned': 'vacant_house_address',
-            '名寄せ元情報_akiya_result_cleaned': 'vacant_house_source_info',
-            '住所_geocoding_cleaned': 'geocoded_address',
-            'lat_geocoding_cleaned': 'geocoded_latitude',
-            'lon_geocoding_cleaned': 'geocoded_longitude',
-            '名寄せ元情報_geocoding_cleaned': 'geocoding_source_info',
-            'suido_residence_flag': 'has_water_supply',
-            'juki_residence_flag': 'has_juki_registry',
-            'touki_residence_flag': 'has_touki_registry',
-            'juki_suido_flag': 'has_juki_and_water',
-            'akiya_result_cleaned_flag': 'has_vacant_result',
-            'juki_suido_touki_flag': 'has_juki_water_property',
-            'geocoding_cleaned_flag': 'has_geocoding',
-            'juki_suido_touki_akiya_flag': 'has_juki_water_property_vacant',
-            'fid': 'fid',
-            'gml_id': 'gml_id',
-            'class': 'class',
-            'geometry_plateau': 'geometry',
-            'measuredHeight': 'measuredheight',
-            'measuredHeight_uom': 'measuredheight_uom',
-            'srcScale': 'src_scale',
-            'geometrySrcDesc': 'geometry_src_desc',
-            'thematicSrcDesc': 'thematic_src_desc',
-            'lod1HeightType': 'lod1_height_type',
-            'buildingID': 'building_id',
-            'prefecture': 'prefecture',
-            'city': 'city',
-            'description': 'description',
-            'rank': 'rank',
-            'depth': 'depth',
-            'depth_uom': 'depth_uom',
-            'adminType': 'admin_type',
-            'scale': 'scale',
-            'duration': 'duration',
-            'duration_uom': 'duration_uom',
-            '建築確認申請の用途': 'building_use',
-            '地上階数': 'floors_above_ground',
-            '地下階数': 'floors_below_ground',
-            'value': 'value',
-            'value_uom': 'value_uom',
-            'buildingDisasterRiskAttribute|BuildingInlandFloodingRiskAttribute|description': 'inland_flooding_risk_desc',
-            'buildingDisasterRiskAttribute|BuildingInlandFloodingRiskAttribute|rank': 'inland_flooding_risk_rank',
-            'buildingDisasterRiskAttribute|BuildingInlandFloodingRiskAttribute|depth': 'inland_flooding_risk_depth',
-            'buildingDisasterRiskAttribute|BuildingInlandFloodingRiskAttribute|depth_uom': 'inland_flooding_risk_depth_uom',
-            'buildingDisasterRiskAttribute|BuildingRiverFloodingRiskAttribute|description': 'river_flooding_risk_desc',
-            'buildingDisasterRiskAttribute|BuildingRiverFloodingRiskAttribute|rank': 'river_flooding_risk_rank',
-            'buildingDisasterRiskAttribute|BuildingRiverFloodingRiskAttribute|depth': 'river_flooding_risk_depth',
-            'buildingDisasterRiskAttribute|BuildingRiverFloodingRiskAttribute|depth_uom': 'river_flooding_risk_depth_uom',
-            'buildingDisasterRiskAttribute|BuildingLandSlideRiskAttribute|description': 'landslide_risk_desc',
-            '大規模店舗名称': 'large_store_name',
-            'appearanceSrcDesc': 'appearance_src_desc',
-            'branchID': 'branch_id',
-            'residenceID': 'residence_id',
-            'test_flg': 'is_test',
-            'name': 'name',
-            'areaType': 'area_type',
-            'pred': 'predicted_label',
-            'pred_proba': 'predicted_probability',
-            'S_NAME': 'area_group'
-        }
-        # カラム名を変換
-        input_data = input_data.drop('geometry', axis=1, errors='ignore')
+        # カラム名のマッピング（日本語→英語）
+        mapping_header = MAPPING_E022_TO_IF001
+        # 重複防止: 英語列が既にある場合は日本語列を削除してから rename
+        for jp_col, en_col in mapping_header.items():
+            if jp_col in input_data.columns and en_col in input_data.columns:
+                input_data = input_data.drop(columns=[jp_col], errors="ignore")
+
+        # カラム名を変換（マッピングにあるものだけ）
         input_data = input_data.rename(columns=mapping_header)
-        existing_columns = input_data.columns.tolist()
-        mapped_columns = [col for col in mapping_header.values() if col in existing_columns]
-        input_data = input_data[mapped_columns]
+        all_columns = input_data.columns.tolist()
+        # 重複除去用: マッピング済み＋predicted_label_* のうち存在するもの
+        mapped_columns = [
+            col for col in mapping_header.values() if col in all_columns
+        ]
+        for threshold_percent in range(5, 96, 5):
+            column_name = f"predicted_label_{threshold_percent:02d}"
+            if column_name in all_columns:
+                mapped_columns.append(column_name)
+        # 全カラムを保持（マッピング外のカラムもDBに保存する）
         input_data = drop_duplicates(input_data, mapped_columns)
-        
-        # SQLiteにデータを挿入        
-        input_data['data_set_result_id'] = data_set_result_id 
-        if 'reference_date' not in input_data.columns:
-            input_data['reference_date'] = ""
-        
+
+        # SQLiteにデータを挿入
+        input_data["data_set_result_id"] = data_set_result_id
+        if "reference_date" not in input_data.columns:
+            input_data["reference_date"] = ""
+
         # Find the first valid reference_date that is not NaN, None, or empty
-        reference_date_value = input_data.loc[
-            input_data['reference_date'].notna() & (input_data['reference_date'] != ''), 
-            'reference_date'
-        ].iloc[0] if not input_data.loc[
-            input_data['reference_date'].notna() & (input_data['reference_date'] != ''), 
-                'reference_date'
-            ].empty else ''
+        reference_date_value = (
+            input_data.loc[
+                input_data["reference_date"].notna()
+                & (input_data["reference_date"] != ""),
+                "reference_date",
+            ].iloc[0]
+            if not input_data.loc[
+                input_data["reference_date"].notna()
+                & (input_data["reference_date"] != ""),
+                "reference_date",
+            ].empty
+            else ""
+        )
 
-        # Replace NaN, None, and empty values with the found value (or leave it empty if no valid value is found)
-        input_data['reference_date'] = input_data['reference_date'].replace([None, '', pd.NA], reference_date_value)
+        # Replace NaN, None, and empty values with the found value
+        # (or leave it empty if no valid value is found)
+        input_data["reference_date"] = input_data["reference_date"].replace(
+            [None, "", pd.NA], reference_date_value
+        )
 
-        if input_data.get("structure_name", None) is not None:
-            structure_map = { 0: "RC造", 1: "SRC造", 2:"S造", 3:"その他", 4:"木造" }
-            input_data["structure_name"] = input_data["structure_name"].map(structure_map).fillna(input_data["structure_name"])
+        # _odsカラムをoptional_data_source JSONに変換
+        input_data = collect_ods_to_json(input_data)
 
-        is_success = create_data_set_detail_buildings_or_area(input_data)
-        if not is_success:
-            raise
+        create_data_set_detail_buildings_or_area(input_data)
 
     except Exception as e:
         # エラー時の処理
         set_error(ERROR_20007)
-        raise
+        raise Exception(e)
 
-def drop_duplicates(df, subset, keep="first"):
-        """
-        データフレームから重複行を削除する
-        Parameters
-        ----------
-        df : pandas.DataFrame
-            重複を削除するデータフレーム
-        subset : list
-            重複を判定するカラムのリスト
-        keep : str, optional
-            残す行を指定（'first', 'last', False）
-        Returns
-        -------
-        pandas.DataFrame
-            重複が削除されたデータフレーム
-        """
-        return df.drop_duplicates(subset=subset, keep=keep)
-    
-def process_and_predict(input_folder, input_file, model_directory, threshold, output_file, required_features, outcome_variable, job_id=None, db_path=None, process=0, data_set_result_id=0):
+
+def drop_duplicates(
+    df: pd.DataFrame, subset: list, keep: str = "first"
+) -> pd.DataFrame:
     """
-    入力データを処理し、予測を行い、結果を保存する
+    データフレームから重複行を削除する
+    Parameters
+    ----------
+    df : pd.DataFrame
+        重複を削除するデータフレーム
+    subset : list
+        重複を判定するカラムのリスト
+    keep : str, optional
+        残す行を指定（'first', 'last', False）
+    Returns
+    -------
+    pd.DataFrame
+        重複が削除されたデータフレーム
     """
-    try:
-        process = (process/7)
-        process_init = process
-        # SQLiteの接続処理をエラーハンドリング付きで実行
-        sqlite_enabled = False
-        if db_path:
-            try:
-                connect_sqllite(db_path)
-                sqlite_enabled = True
-            except Exception as e:
-                print(f"SQLite接続に失敗しました: {e}. SQLiteを使用せずに続行します。")
+    return df.drop_duplicates(subset=subset, keep=keep)
 
-        task_id = None
-        if sqlite_enabled and job_id:
-            task_id = create_or_update_job_task(job_id, progress_percent="0", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}))
-            create_or_update_job(job_id, process)
-            process += process_init
-  
-        input_path = os.path.join(input_folder, input_file)
-        input_data = read_csv(input_path)
 
-        # '世帯コード'の重複を確認し、重複するレコードを削除
-        input_data = input_data.drop_duplicates(subset=['世帯コード'], keep='first').reset_index(drop=True)
-        condition = (input_data['住定期間'] < 1000)
-        if any(condition) and len(condition) > 0:
-            input_data = input_data[~condition].reset_index(drop=True)
+if __name__ == "__main__":
 
-        # '正規化住所'の重複を確認し、3件以上の重複がある場合、該当するすべてのレコードを削除
-        duplicate_counts = input_data['正規化住所'].value_counts()  # 各値の出現回数を取得
-        to_remove = duplicate_counts[duplicate_counts >= 2].index  # 3件以上の値を取得
-        if any(to_remove) and len(to_remove) > 0:
-            input_data = input_data[~input_data['正規化住所'].isin(to_remove)].reset_index(drop=True)  # 該当値を除外
-        
-        if sqlite_enabled and job_id:
-            create_or_update_job_task(job_id, progress_percent="20", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
-            create_or_update_job(job_id, process)
-            process += process_init
-        # 予測用データ（REQUIRED_FEATURES）を準備するためのコピーを作成
-        prediction_data = input_data.copy()
+    parser = argparse.ArgumentParser(
+        description="空き家予測を実行します。 / Execute vacant house prediction."
+    )
+    parser.add_argument(
+        "--input_path",
+        type=str,
+        required=True,
+        help="入力CSVファイルへのパス。 / Path to the input CSV file.",
+    )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        required=True,
+        help="訓練済みモデルファイルへのパス。 / Path to the trained model file.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        required=True,
+        help="出力ディレクトリへのパス。 / Path to the output directory.",
+    )
+    parser.add_argument(
+        "--thresh",
+        type=float,
+        default=0.5,
+        help="空き家と判定する確率の閾値。 / Probability threshold for classifying as a vacant house.",
+    )
 
-        # 'geometry'列を一時的に保存し、予測から除外
-        geometry_data = prediction_data['geometry']
-        prediction_data = prediction_data.drop(columns=['geometry'], errors='ignore')
+    args = parser.parse_args()
 
-        # Get models and columns train
-        models, columns = load_models(model_directory, job_id)
-        if not columns:
-            columns = required_features
-
-        if sqlite_enabled and job_id:
-            create_or_update_job_task(job_id, progress_percent="40", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
-            create_or_update_job(job_id, process)
-            process += process_init
-
-        features_columns = columns
-
-        # Rename columns
-        rename_columns = {}
-        for column in prediction_data.columns:
-            col = column.split('_')[0]
-            if col in features_columns:
-                rename_columns[column] = col
-        prediction_data.rename(columns=rename_columns, errors='ignore', inplace=True)
-
-        # 閉栓フラグをブール値に変換
-        if "閉栓フラグ" in prediction_data.columns:
-            try:
-                prediction_data["閉栓フラグ"] = prediction_data["閉栓フラグ"].astype("bool")
-            except:
-                prediction_data["閉栓フラグ"] = prediction_data["閉栓フラグ"].map({"True": True, "False": False}).astype("bool")
-        # 登記日付_touki_residenceを日付型に変換
-        if "登記日付" in prediction_data.columns:
-            prediction_data["登記日付"] = pd.to_datetime(prediction_data["登記日付"], errors='coerce')
-            prediction_data["登記日付"] = prediction_data["登記日付"].dt.year
-
-        # 構造名称_touki_residenceをカテゴリ型に変換
-        if "構造名称" in prediction_data.columns: 
-            fill_value = [ i for i in np.arange(100) if i not in prediction_data["構造名称"].unique()]
-            if len(fill_value) == 0:
-                fill_value = [ i for i in [999,9999,99999,9999999,9999999] if i not in prediction_data["構造名称"].unique()]
-            prediction_data["構造名称"] = prediction_data["構造名称"].fillna(fill_value[0])
-            prediction_data["構造名称"] = prediction_data["構造名称"].astype("category")
-
-        if sqlite_enabled and job_id:
-            create_or_update_job_task(job_id, progress_percent="50", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
-            create_or_update_job(job_id, process)
-            process += process_init
-        # 特徴量のチェック
-        prediction_data, features_match, message = check_features(prediction_data, features_columns, outcome_variable)
-        if not features_match:
-            if sqlite_enabled and job_id:
-                raise
-            return message, None
-
-        # 予測の実行
-        test_preds, test_preds_proba = predict(models, prediction_data, features_columns, threshold)
-        if sqlite_enabled and job_id:
-            create_or_update_job_task(job_id, progress_percent="70", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
-            create_or_update_job(job_id, process)
-            process += process_init
-
-        # 元のinput_dataに予測結果を追加
-        input_data['predicted_label'] = test_preds
-        input_data['predicted_probability'] = test_preds_proba
-        input_data['geometry'] = geometry_data
-        output_dir = re.sub(r"D902.*", "", output_file)
-        os.makedirs(output_dir, exist_ok=True)
-
-        if sqlite_enabled and job_id:
-            #insert SQLite
-            insert_sqlite(input_data, data_set_result_id)
-
-            create_or_update_job_task(job_id, progress_percent="90", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id)
-            create_or_update_job(job_id, process)
-            process += process_init
-        # 試行するエンコーディングのリスト
-        encodings = ['utf-8-sig']
-        for encoding in encodings:
-            try:
-                # 各エンコーディングでCSVファイルとして保存を試みる
-                input_data.to_csv(output_file, index=False, encoding=encoding)
-
-                if sqlite_enabled and job_id:
-                    create_or_update_job_task(job_id, progress_percent="100", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}), id= task_id, is_finish=True)
-                    create_or_update_job(job_id, process)
-                    process += process_init
-                return f"予測結果が {output_file} に保存されました", output_file
-            except Exception as e:
-                # 保存中にエラーが発生した場合、エラーメッセージを表示して次のエンコーディングを試す
-                set_error(ERROR_20005, output_file, encoding)
-                raise
-
-        return f"{output_file} への予測結果の保存に失敗しました", None
-    except Exception as e:
-        if ERROR_CODE is None:
-            set_error(ERROR_20008)
-        if task_id is not None:
-            create_or_update_job_task(job_id, progress_percent="", preprocess_type=None, error_code=ERROR_CODE, error_msg=ERROR_MSG, result=json.dumps({}), id= task_id, is_finish=True)
-        raise Exception("空き家判定処理中にエラーが発生しました。")
-
-def set_error(value, param_st1=None, param_st2=None):
-    global ERROR_CODE
-    global ERROR_MSG
-    ERROR_CODE = value['code']
-    if param_st1 is not None and param_st2 is not None:
-        ERROR_MSG = value['message'].format(param_st1=param_st1, param_st2=param_st2)
-    elif param_st1 is not None:
-        ERROR_MSG = value['message'].format(param_st1=param_st1)
-    else:
-        ERROR_MSG = value['message']
-
-def normalize_dates(df, column, formats=['%Y/%m/%d', '%d/%m/%Y', '%Y-%m-%d', '%m/%d/%Y', '%Y%m%d']):
-    # Initialize the temporary column with NaN values
-    temp_column = f'{column}_normalized'
-    df[temp_column] = np.nan
-
-    # Try the provided formats on the invalid values
-    for fmt in formats:
-        mask = df[temp_column].isna()
-        df.loc[mask, temp_column] = pd.to_datetime(
-            df.loc[mask, column], format=fmt, errors='coerce'
-        )
-
-    # Remove the time portion and keep only the date
-    df[temp_column] = pd.to_datetime(df[temp_column], errors='coerce')
-    df[column] = df[temp_column]
-    
-    return df.drop(f'{column}_normalized',axis=1)
+    main(
+        input_path=args.input_path,
+        model_path=args.model_path,
+        output_dir=args.output_dir,
+        thresh=args.thresh,
+        job_id=None,
+        db_path=None,
+        process=0,
+        data_set_result_id=0,
+    )

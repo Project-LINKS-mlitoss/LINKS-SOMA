@@ -5,7 +5,6 @@ mod material;
 use std::{f64::consts::FRAC_PI_2, fs::File, io::BufWriter, path::PathBuf, sync::Mutex};
 
 use crate::sink::cesiumtiles::utils::calculate_normal;
-use ahash::{HashMap, HashSet, RandomState};
 use atlas_packer::{
     export::{AtlasExporter as _, JpegAtlasExporter},
     pack::AtlasPacker,
@@ -17,6 +16,8 @@ use atlas_packer::{
 };
 use earcut::{utils3d::project3d_to_2d, Earcut};
 use flatgeom::MultiPolygon;
+use foldhash::{fast::RandomState, HashMap, HashSet};
+use geocentric::geodetic_to_geocentric;
 use glam::{DMat4, DVec3, DVec4};
 use gltf_writer::write_gltf_glb;
 use indexmap::IndexSet;
@@ -24,7 +25,6 @@ use itertools::Itertools;
 use material::{Material, Texture};
 use nusamai_citygml::{object::ObjectStereotype, schema::Schema, GeometryType, Value};
 use nusamai_plateau::appearance;
-use nusamai_projection::cartesian::geodetic_to_geocentric;
 use rayon::iter::{IntoParallelIterator, ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
@@ -32,11 +32,10 @@ use url::Url;
 
 use crate::{
     get_parameter_value,
-    option::use_textured_lod_config,
     parameters::*,
     pipeline::{Feedback, PipelineError, Receiver, Result},
     sink::{cesiumtiles::metadata, DataRequirements, DataSink, DataSinkProvider, SinkInfo},
-    transformer::TransformerRegistry,
+    transformer::{use_lod_config, TransformerSettings},
 };
 
 use super::option::{limit_texture_resolution_parameter, output_parameter};
@@ -59,9 +58,9 @@ impl DataSinkProvider for GltfSinkProvider {
         params
     }
 
-    fn transformer_options(&self) -> TransformerRegistry {
-        let mut settings: TransformerRegistry = TransformerRegistry::new();
-        settings.insert(use_textured_lod_config("max_lod"));
+    fn transformer_options(&self) -> TransformerSettings {
+        let mut settings: TransformerSettings = TransformerSettings::new();
+        settings.insert(use_lod_config("max_lod", Some(&["textured_max_lod"])));
 
         settings
     }
@@ -81,7 +80,7 @@ impl DataSinkProvider for GltfSinkProvider {
 
 pub struct GltfSink {
     output_path: PathBuf,
-    transform_settings: TransformerRegistry,
+    transform_settings: TransformerSettings,
     limit_texture_resolution: Option<bool>,
 }
 
@@ -149,7 +148,7 @@ pub struct PrimitiveInfo {
 pub type Primitives = HashMap<material::Material, PrimitiveInfo>;
 
 impl DataSink for GltfSink {
-    fn make_requirements(&mut self, properties: TransformerRegistry) -> DataRequirements {
+    fn make_requirements(&mut self, properties: TransformerSettings) -> DataRequirements {
         let default_requirements: DataRequirements = DataRequirements {
             resolve_appearance: true,
             key_value: crate::transformer::KeyValueSpec::JsonifyObjectsAndArrays,
@@ -312,7 +311,8 @@ impl DataSink for GltfSink {
 
             let psi = ((1. - ellipsoid.e_sq()) * center_lat.to_radians().tan()).atan();
 
-            let (tx, ty, tz) = geodetic_to_geocentric(&ellipsoid, center_lng, center_lat, 0.);
+            let (tx, ty, tz) =
+                geodetic_to_geocentric(ellipsoid.a(), ellipsoid.e_sq(), center_lng, center_lat, 0.);
             let h = (tx * tx + ty * ty + tz * tz).sqrt();
 
             DMat4::from_translation(DVec3::new(0., -h, 0.))
@@ -387,8 +387,13 @@ impl DataSink for GltfSink {
                             .polygons
                             .transform_inplace(|&[lng, lat, height, u, v]| {
                                 // geographic to geocentric
-                                let (x, y, z) =
-                                    geodetic_to_geocentric(&ellipsoid, lng, lat, height);
+                                let (x, y, z) = geodetic_to_geocentric(
+                                    ellipsoid.a(),
+                                    ellipsoid.e_sq(),
+                                    lng,
+                                    lat,
+                                    height,
+                                );
                                 // z-up to y-up
                                 let v_xyz = DVec4::new(x, z, -y, 1.0);
                                 // local ENU coordinate

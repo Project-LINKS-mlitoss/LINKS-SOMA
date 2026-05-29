@@ -1,4 +1,5 @@
 import { builtinModules } from "node:module";
+import { execSync } from "node:child_process";
 import type { AddressInfo } from "node:net";
 import type { ConfigEnv, Plugin, UserConfig } from "vite";
 import pkg from "./package.json";
@@ -72,7 +73,54 @@ export function getBuildDefine(env: ConfigEnv<"build">): Record<string, any> {
     {} as Record<string, any>,
   );
 
+  // ビルド日時の定義を追加
+  const buildDate = new Date();
+  define.__BUILD_DATE__ = JSON.stringify(buildDate.toISOString());
+  define.__BUILD_TIMESTAMP__ = buildDate.getTime();
+
+  // Git情報とビルド環境情報を追加
+  const gitInfo = getGitInfo();
+  const buildInfo = getBuildInfo();
+
+  define.__GIT_COMMIT_HASH__ = JSON.stringify(gitInfo.commitHash);
+  define.__GIT_BRANCH__ = JSON.stringify(gitInfo.branch);
+  define.__BUILD_ENV__ = JSON.stringify(buildInfo.environment);
+  define.__WORKFLOW_RUN__ = buildInfo.workflowRun;
+
   return define;
+}
+
+function getGitInfo(): { commitHash: string; branch: string } {
+  // GitHub Actions環境の場合は環境変数を優先使用
+  if (process.env.VITE_GIT_COMMIT_HASH && process.env.VITE_GIT_BRANCH) {
+    return {
+      commitHash: process.env.VITE_GIT_COMMIT_HASH.substring(0, 7),
+      branch: process.env.VITE_GIT_BRANCH,
+    };
+  }
+
+  // ローカル環境でGitコマンドを実行
+  try {
+    const commitHash = execSync("git rev-parse HEAD", { encoding: "utf8" })
+      .trim()
+      .substring(0, 7);
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      encoding: "utf8",
+    }).trim();
+
+    return { commitHash, branch };
+  } catch {
+    return { commitHash: "unknown", branch: "unknown" };
+  }
+}
+
+function getBuildInfo(): { environment: string; workflowRun: number | null } {
+  const environment = process.env.VITE_BUILD_ENV || "local";
+  const workflowRun = process.env.VITE_WORKFLOW_RUN
+    ? parseInt(process.env.VITE_WORKFLOW_RUN, 10)
+    : null;
+
+  return { environment, workflowRun };
 }
 
 export function pluginExposeRenderer(name: string): Plugin {

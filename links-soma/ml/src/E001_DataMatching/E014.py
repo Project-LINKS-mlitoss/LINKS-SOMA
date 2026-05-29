@@ -10,37 +10,47 @@
 
 import json
 import sys
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import io
 import os
 import re
 import chardet
 import pandas as pd
+import polars as pl
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.sparse import csr_matrix
 import numpy as np
 import warnings
+from datetime import datetime
+import traceback
+import gc
 
 warnings.filterwarnings("ignore")
 current_dir = os.path.dirname(os.path.abspath(__file__))
-async_tasks_path = os.path.join(current_dir, '..', 'async_tasks')
+async_tasks_path = os.path.join(current_dir, "..", "async_tasks")
 if async_tasks_path not in sys.path:
     sys.path.append(async_tasks_path)
 
 try:
     from utils import *
     from constants import *
+    from E012 import CleanData, KanjiConverter
+
 except ImportError:
     sys.path.remove(async_tasks_path)
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+    sys.path.append(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+    )
     from async_tasks.utils import *
     from async_tasks.constants import *
+    from src.E001_DataMatching.E012 import CleanData, KanjiConverter
 
 
 OUTPUT_PATH = "matched_data.csv"
-ERROR_CODE=None
-ERROR_MSG=None
+ERROR_CODE = None
+ERROR_MSG = None
+
 
 @staticmethod
 def detect_encoding(file_path):
@@ -58,23 +68,24 @@ def detect_encoding(file_path):
         検出されたエンコーディング
     """
     # ファイルの内容を読み込む
-    with open(file_path, 'rb') as file:
+    with open(file_path, "rb") as file:
         raw_data = file.read(100)
     # エンコーディングを検出して返す
     result = chardet.detect(raw_data)
-    return result['encoding']
+    return result["encoding"]
+
 
 def read_data(path: str, **kwargs) -> pd.DataFrame:
     """
     CSVファイルを読み込む
-    
+
     Parameters
     ----------
     path : str
         読み込むファイルのパス
     **kwargs : dict
         pandas.read_csv に渡す追加のキーワード引数
-    
+
     Returns
     -------
     pd.DataFrame
@@ -83,44 +94,171 @@ def read_data(path: str, **kwargs) -> pd.DataFrame:
     try:
         # ファイルの拡張子を取得し、小文字に変換
         file_extension = os.path.splitext(path)[1].lower()
-        
+
         # CSVファイル以外の場合はエラーを発生させる
-        if file_extension != '.csv':
+        if file_extension != ".csv":
             set_error(ERROR_00026, file_extension)
-            raise ValueError(f"CSVファイル以外は対応していません: {file_extension}")
-        
-        # 複数のエンコーディングを試行                
-        encodings = ['utf-8-sig']
+            raise ValueError(
+                f"CSVファイル以外は対応していません: {file_extension}"
+            )
+
+        # 複数のエンコーディングを試行
+        encodings = ["utf-8-sig"]
         for encoding in encodings:
             try:
                 # 各エンコーディングでファイルの読み込みを試みる
-                return pd.read_csv(path, encoding=encoding, **kwargs)
+                return read_large_csv(path, encoding=encoding)
             except UnicodeDecodeError:
                 # デコードエラーが発生した場合、次のエンコーディングを試す
                 continue
-        
+
         # 自動でエンコーディングを検出し、再度読み込みを試みる
         detected_encoding = detect_encoding(path)
         if detected_encoding:
-            return pd.read_csv(path, encoding=detected_encoding, **kwargs)
+            return read_large_csv(path, encoding=encoding)
         set_error(ERROR_00027, path)
         # 適切なエンコーディングが見つからない場合、エラーを発生させる
-        raise ValueError(f"適切なエンコーディングが見つかりませんでした: {path}")
+        raise ValueError(
+            f"適切なエンコーディングが見つかりませんでした: {path}"
+        )
     except Exception as e:
         # 何らかの例外が発生した場合、エラーメッセージを表示してNoneを返す
         if ERROR_CODE is None:
             set_error(ERROR_00011, path)
-        raise
+            raise Exception(
+                "CSV形式（UTF-8 BOM付き）のファイルを入力してください。"
+            )
+        raise Exception(e)
+
+
+def read_large_csv(path: str, encoding: str = 'utf-8-sig') -> pd.DataFrame:
+    """
+    Read large CSV with memory optimization
+    """
+    # Step 1: Read sample
+    try:
+        sample = pd.read_csv(
+            path,
+            encoding=encoding,
+            engine='pyarrow'
+        ).head(1000)
+    except Exception:
+        try:
+            sample = pd.read_csv(
+                path,
+                encoding=encoding,
+                nrows=1000,
+                engine='c'
+            )
+        except Exception:
+            sample = pd.read_csv(
+                    path,
+                    encoding=encoding,
+                    nrows=100
+                )
+
+    # Step 2: Optimize dtypes
+    dtypes = {}
+
+    for col in sample.columns:
+        try:
+            col_data = sample[col]
+            # Check if it's DataFrame (duplicate names)
+            if isinstance(col_data, pd.DataFrame):
+                # Use first occurrence
+                col_type = col_data.iloc[:, 0].dtype
+            else:
+                col_type = col_data.dtype
+        except Exception:
+            continue
+
+        if col_type == 'object':
+            dtypes[col] = 'string'
+
+        elif col_type == 'float64':
+            # YYYYMMDD 形式の8桁日付整数値（例: 20121001）は
+            # float32（有効桁数約7桁）に落とすと精度ロスで値が変質する
+            # （20121001 → 20121000）。日付カラムを保護するためfloat64を維持
+            dtypes[col] = 'float64'
+
+        elif col_type == 'int64':
+            non_null = sample[col].dropna()
+            if len(non_null) > 0:
+                try:
+                    pd.to_numeric(non_null, errors='raise', downcast='integer')
+                    col_min = sample[col].min()
+                    col_max = sample[col].max()
+
+                    if col_min >= 0:
+                        if col_max < 255:
+                            dtypes[col] = 'uint8'
+                        elif col_max < 65535:
+                            dtypes[col] = 'uint16'
+                        else:
+                            dtypes[col] = 'uint32'
+                    else:
+                        if col_min > -128 and col_max < 127:
+                            dtypes[col] = 'int8'
+                        elif col_min > -32768 and col_max < 32767:
+                            dtypes[col] = 'int16'
+                        else:
+                            dtypes[col] = 'int32'
+                except (ValueError, TypeError):
+                    pass
+
+    del sample
+    gc.collect()
+
+    # Step 3: Read and concat in batches
+    result_chunks = []
+    batch_size = 20
+    chunk_list = []
+
+    for chunk in pd.read_csv(
+        path,
+        encoding=encoding,
+        chunksize=5000,
+        dtype=dtypes,
+        engine='c'
+    ):
+        chunk_list.append(chunk)
+
+        # Concat when batch is full
+        if len(chunk_list) >= batch_size:
+            batch_result = pd.concat(chunk_list, ignore_index=True)
+            result_chunks.append(batch_result)
+
+            # Release memory immediately
+            del chunk_list, batch_result
+            gc.collect()
+            chunk_list = []
+
+    # Concat remaining chunks
+    if chunk_list:
+        batch_result = pd.concat(chunk_list, ignore_index=True)
+        result_chunks.append(batch_result)
+        del chunk_list, batch_result
+        gc.collect()
+
+    # Step 4: Final concat
+    if result_chunks:
+        df = pd.concat(result_chunks, ignore_index=True)
+        del result_chunks
+        gc.collect()
+        return df
+    else:
+        return pd.DataFrame()
+
 
 def get_column_names(csv_file: str) -> List[str]:
     """
     CSVファイルの列名を取得する
-    
+
     Parameters
     ----------
     csv_file : str
         CSVファイルのパス
-    
+
     Returns
     -------
     List[str]
@@ -135,323 +273,1181 @@ def get_column_names(csv_file: str) -> List[str]:
         # エラーが発生した場合、メッセージを表示して空のリストを返す
         return []
 
-def normalize_dates(df, column, formats=['%Y/%m/%d', '%d/%m/%Y', '%Y-%m-%d', '%m/%d/%Y', '%Y%m%d']):
-    # Initialize the temporary column with NaN values
-    temp_column = f'{column}_normalized'
-    df[temp_column] = np.nan
 
-    # Try the provided formats on the invalid values
-    for fmt in formats:
-        mask = df[temp_column].isna()
-        df.loc[mask, temp_column] = pd.to_datetime(
-            df.loc[mask, column], format=fmt, errors='coerce'
+def normalize_text(text):
+    """
+    テキストを正規化する（空白文字の除去）
+
+    Parameters
+    ----------
+    text : str
+        正規化するテキスト
+
+    Returns
+    -------
+    str
+        正規化されたテキスト
+    """
+    if pd.isna(text) or text is None:
+        return text
+
+    # 文字列に変換
+    text = str(text)
+
+    # 先頭末尾の空白文字を除去
+    text = text.strip()
+
+    # 連続する空白文字を単一の空白に置換
+    text = re.sub(r"\s+", " ", text)
+
+    return text
+
+
+def add_flags_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    フラグを追加する
+    """
+    F_COLS = [
+        "suido_usage_f1",
+        "suido_usage_f2",
+        "suido_usage_f3",
+        "suido_usage_f4",
+        "suido_usage_f5",
+        "suido_usage_f6",
+    ]
+
+    for c in F_COLS:
+        if c not in df.columns:
+            raise ValueError(f"必要な列が見つかりません: {c}")
+    vals = df[F_COLS].apply(pd.to_numeric, errors="coerce").to_numpy()
+
+    # 連続2か月ゼロ
+    zero = vals == 0
+    consecutive_2 = (
+        (zero[:, 0] & zero[:, 1])
+        | (zero[:, 1] & zero[:, 2])
+        | (zero[:, 2] & zero[:, 3])
+        | (zero[:, 3] & zero[:, 4])
+        | (zero[:, 4] & zero[:, 5])
+    ).astype(int)
+
+    all_null = np.isnan(vals).all(axis=1)
+    consecutive_2 = consecutive_2.astype(object)
+    consecutive_2[~all_null] = consecutive_2[~all_null].astype(int)  # 1/0 に変換
+    consecutive_2[all_null] = ""
+
+    f5, f6 = vals[:, 4], vals[:, 5]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rate = (f6 - f5) / f5
+
+    rate[(f5 == 0) & (f6 == 0)] = 0.0  # Both zero → 0%
+    rate[(f5 == 0) & (f6 > 0)] = 1.0   # From 0 to positive → 100%
+    rate[(f5 == 0) & (f6 < 0)] = 0.0   # Invalid data → 0%
+
+    df = df.copy()
+    df["flag_zero_usage_over4consecutivemonths"] = consecutive_2
+    df["change_rate_waterusage_over_last4months"] = rate
+    return df
+
+
+def usage_building_flag(
+    input_path: str, output_path: str, job_id: str, db_path: str, task_id: str | None, task_id_summarization: int = None, result_summarization: str = None,
+):
+    if db_path:
+        connect_sqllite(db_path)
+    if job_id:
+        create_or_update_job(job_id, "82")
+        task_id = create_or_update_job_task(
+            job_id,
+            progress_percent="60",
+            preprocess_type="e015",
+            error_code=None,
+            error_msg=None,
+            result=None,
+            id=task_id,
         )
 
-    # Remove the time portion and keep only the date
-    df[temp_column] = pd.to_datetime(df[temp_column], errors='coerce')
-    df[column] = df[temp_column]
-    
-    return df.drop(f'{column}_normalized',axis=1)
+    try:
+        df_pl = pl.read_csv(
+            input_path, encoding="utf-8-sig", infer_schema_length=0
+        )
+    except Exception:
+        df = read_data(input_path)
+        object_cols = df.select_dtypes(include=['object']).columns
 
-def embedding_address(main_csv: io.BytesIO | str, sub_csv: io.BytesIO | str, main_column: str, sub_column: str, merge_base: str, output_path:str, ngram: int = 0, threshold: float = 0.5, batch_size: int = 1000, job_id: str = None, db_path: str = None, input_source: list = [], progress_percent_job = 50, progress_percent = 0) -> Tuple[str, str]:   
+        # Vectorized conversion: fillna then convert to string
+        if len(object_cols) > 0:
+            df[object_cols] = (
+                df[object_cols].fillna('').astype(str)
+            )
+        df_pl = pl.from_pandas(df)
+        del df
+
+    # ----------------------------------------
+    # 建物種別の有無に応じてフラグを付与するだけのロジック
+    # ----------------------------------------
+    # 「不明／欠損」を「判定不可」とする
+    df_pl = df_pl.with_columns(
+        pl.when(
+            pl.col("usage_building_type_determination").is_null() | (pl.col("usage_building_type_determination") == "不明")
+        )
+        .then(pl.lit(1))
+        .otherwise(pl.lit(0))
+        .alias("buildingtype_determination_not_possible_flag")
+    )
+
+    if task_id_summarization:
+        # Check if result_summarization is string, then load it
+        if isinstance(result_summarization, str):
+            result_summarization = json.loads(result_summarization)
+        elif not isinstance(result_summarization, dict):
+            result_summarization = {}
+
+        # Calculate record combinations total (all records)
+        record_combinations_total = len(df_pl)
+        
+        # Calculate record combinations statistics
+        # Get flag columns
+        flag_cols = {
+            'suido_residence_flag': 'has_water_supply',
+            'juki_residence_flag': 'has_juki_registry',
+            'touki_residence_flag': 'has_touki_registry'
+        }
+
+        # Create flags dict for checking existence in dataframe
+        existing_flags = {}
+        for flag_col in flag_cols.keys():
+            if flag_col in df_pl.columns:
+                existing_flags[flag_col] = flag_cols[flag_col]
+
+        # Calculate estimation target total count
+        # (records with at least one flag = 1)
+        if existing_flags:
+            # Convert flag columns to numeric type before comparison
+            # to handle cases where flags might be strings
+            df_pl_numeric = df_pl.with_columns([
+                pl.col(flag_col).cast(pl.Int64, strict=False)
+                for flag_col in existing_flags.keys()
+            ])
+
+            condition = None
+            for flag_col in existing_flags.keys():
+                if condition is None:
+                    condition = pl.col(flag_col) == 1
+                else:
+                    condition = condition | (pl.col(flag_col) == 1)
+            estimation_target_total_count = df_pl_numeric.filter(
+                condition
+            ).height
+
+            # Group by all flag columns and count
+            group_cols = list(existing_flags.keys())
+            combinations_df = df_pl_numeric.group_by(group_cols).agg(
+                pl.count().alias('count')
+            ).sort(group_cols)
+
+            # Convert to pandas for easier iteration
+            combinations_pd = combinations_df.to_pandas()
+
+            record_combinations = []
+            for _, row in combinations_pd.iterrows():
+                combination = {}
+                for flag_col, field_name in existing_flags.items():
+                    # Convert to int for comparison (handle both int and string)
+                    flag_value = int(row[flag_col]) if pd.notna(row[flag_col]) else 0
+                    combination[field_name] = bool(flag_value == 1)
+                combination['count'] = int(row['count'])
+                if record_combinations_total > 0:
+                    percentage = (
+                        row['count'] / record_combinations_total * 100
+                    )
+                else:
+                    percentage = 0.0
+                combination['percentage'] = round(percentage, 2)
+                record_combinations.append(combination)
+        else:
+            estimation_target_total_count = 0
+            record_combinations = []
+
+        # Update result_summarization with new fields
+        result_summarization['estimation_target_total_count'] = (
+            estimation_target_total_count
+        )
+        result_summarization['record_combinations'] = (
+            record_combinations
+        )
+        result_summarization['record_combinations_total'] = (
+            record_combinations_total
+        )
+
+        # Check if geometry_plateau column exists
+        # Convert to string and check if it contains "Polygon" or "MultiPolygon"
+        if 'geometry_plateau' in df_pl.columns:
+            geom_str = df_pl['geometry_plateau'].cast(pl.Utf8)
+            
+            # Count records with null geometry_plateau
+            excluded_from_display_count = df_pl.filter(
+                pl.col('geometry_plateau').is_null()
+            ).height
+            
+            is_polygon = (
+                geom_str.str.contains('POLYGON', literal=False) |
+                geom_str.str.contains('MULTIPOLYGON', literal=False)
+            ).fill_null(False)
+            is_point = (
+                geom_str.str.contains('POINT', literal=False)
+            ).fill_null(False)
+        else:
+            # geometry_plateau がない場合、ジオコーディング座標で判定
+            is_polygon = pl.Series(
+                [False] * len(df_pl),
+                dtype=pl.Boolean
+            )
+            if (
+                'latitude_geocoding_cleaned' in df_pl.columns
+                and 'longitude_geocoding_cleaned' in df_pl.columns
+            ):
+                has_lat = (
+                    pl.col('latitude_geocoding_cleaned').is_not_null()
+                    & (pl.col('latitude_geocoding_cleaned') != '')
+                )
+                has_lon = (
+                    pl.col('longitude_geocoding_cleaned').is_not_null()
+                    & (pl.col('longitude_geocoding_cleaned') != '')
+                )
+                is_point = df_pl.select(
+                    (has_lat & has_lon).alias('v')
+                )['v']
+                excluded_from_display_count = len(df_pl) - is_point.sum()
+            else:
+                is_point = pl.Series(
+                    [False] * len(df_pl),
+                    dtype=pl.Boolean
+                )
+                excluded_from_display_count = len(df_pl)
+
+        # building_polygon_display: has Polygon/MultiPolygon geometry
+        building_polygon_display_count = is_polygon.sum()
+
+        # point_display: has Point geometry
+        point_display_count = is_point.sum()
+
+        # Total includes excluded records
+        building_polygon_breakdown_total = estimation_target_total_count
+
+        # Calculate percentages
+        if building_polygon_breakdown_total > 0:
+            building_polygon_display_pct = round(
+                building_polygon_display_count / building_polygon_breakdown_total * 100, 2
+            )
+            point_display_pct = round(
+                point_display_count / building_polygon_breakdown_total * 100, 2
+            )
+            excluded_from_display_pct = round(
+                excluded_from_display_count / building_polygon_breakdown_total * 100, 2
+            )
+        else:
+            building_polygon_display_pct = 0.0
+            point_display_pct = 0.0
+            excluded_from_display_pct = 0.0
+
+        # Update result_summarization with new fields
+        result_summarization['building_polygon_breakdown'] = {
+            'with_polygon': {
+                'percentage': building_polygon_display_pct,
+                'count': int(building_polygon_display_count)
+            },
+            'without_polygon': {
+                'percentage': point_display_pct,
+                'count': int(point_display_count)
+            },
+            'excluded_from_display': {
+                'percentage': excluded_from_display_pct,
+                'count': int(excluded_from_display_count)
+            }
+        }
+        result_summarization['building_polygon_breakdown_total'] = (
+            building_polygon_breakdown_total
+        )
+
+        _, result_summarization_updated = create_or_update_summarization_job_task(
+            job_id,
+            "30",
+            "preprocess_summary",
+            json.dumps(result_summarization),
+            id=task_id_summarization,
+            is_finish=True,
+        )
+
+    if job_id:
+        create_or_update_job(job_id, "95")
+        create_or_update_job_task(
+            job_id,
+            progress_percent="100",
+            preprocess_type="e015",
+            error_code=None,
+            error_msg=None,
+            result=None,
+            id=task_id,
+            is_finish=True,
+        )
+
+    save_csv(df_pl.to_pandas(), output_path)
+
+
+def translate_column_name(
+    input_path: str,
+    output_path: str,
+    keep_original_suffixes: Optional[tuple] = None,
+    keep_suffix_intact: Optional[tuple] = None,
+):
+    """
+    Translate known columns to Japanese. Columns whose names end with any of
+    keep_original_suffixes are kept as-is (no translation), for optional_data_source
+    and vacant_house outputs.
+    """
+    try:
+        df_pl = pl.read_csv(
+            input_path, encoding="utf-8-sig", infer_schema_length=0
+        )
+    except Exception:
+        # Fallback to pandas if Polars fails
+        df = read_data(input_path, index_col=False)
+        object_cols = df.select_dtypes(include=['object']).columns
+
+        # Vectorized conversion: fillna then convert to string
+        if len(object_cols) > 0:
+            df[object_cols] = (
+                df[object_cols].fillna('').astype(str)
+            )
+        df_pl = pl.from_pandas(df)
+        del df
+
+    cols = df_pl.columns
+    if "geometry_plateau" in cols:
+        if "geometry" not in cols or df_pl["geometry"].is_null().all():
+            df_pl = df_pl.with_columns(
+                pl.col("geometry_plateau").alias("geometry")
+            )
+
+    # Include translated columns + columns that keep original names (optional_data_source / vacant_house)
+    available_columns = [
+        col for col in TRANSLATE_COLUMNS_IF001 if col in df_pl.columns
+    ]
+    if keep_original_suffixes:
+        for col in df_pl.columns:
+            if col in available_columns:
+                continue
+            if any(col.endswith(s) for s in keep_original_suffixes):
+                available_columns.append(col)
+    if keep_suffix_intact:
+        for col in df_pl.columns:
+            if col in available_columns:
+                continue
+            if any(col.endswith(s) for s in keep_suffix_intact):
+                available_columns.append(col)
+    df_pl = df_pl.select(available_columns)
+
+    # Rename only columns that have a translation; others keep original name
+    rename_map = {
+        col: TRANSLATE_COLUMNS_IF001[col]
+        for col in df_pl.columns
+        if col in TRANSLATE_COLUMNS_IF001
+    }
+    if rename_map:
+        df_pl = df_pl.rename(rename_map)
+
+    # Export: strip long optional suffixes (_optional_data_source_cleaned, _vacant_house_cleaned);
+    # if duplicate names after strip, use _1, _2, ...
+    if keep_original_suffixes:
+        col_list = df_pl.columns
+        base_names = []
+        for col in col_list:
+            base = col
+            for s in keep_original_suffixes:
+                if col.endswith(s):
+                    base = col[: -len(s)].rstrip("_") or col
+                    break
+            base_names.append((col, base))
+
+        # Resolve duplicates: same base -> base_1, base_2, ...
+        from collections import defaultdict
+        base_to_indices = defaultdict(list)
+        for i, (_, base) in enumerate(base_names):
+            base_to_indices[base].append(i)
+        final_name_by_idx = {}
+        for base, indices in base_to_indices.items():
+            if len(indices) == 1:
+                final_name_by_idx[indices[0]] = base
+            else:
+                for k, idx in enumerate(indices):
+                    final_name_by_idx[idx] = f"{base}_{k + 1}"
+        rename_export = {
+            base_names[i][0]: final_name_by_idx[i] for i in range(len(base_names))
+        }
+        if rename_export:
+            df_pl = df_pl.rename(rename_export)
+
+    df = df_pl.to_pandas()
+
+    save_csv(df, output_path)
+
+
+def embedding_address(
+    main_csv: io.BytesIO | str,
+    input_source: list[str],
+    output_path: str,
+    job_id: str = None,
+    db_path: str = None,
+    logs_dir=None,
+    task_id_summarization: int = None,
+    result_summarization: str = None,
+    output_directory: str = None,
+) -> Tuple[str, str]:
     """
     住所名寄せ処理を行う
-    
+
     Parameters
     ----------
     main_csv : io.BytesIO
         メインのCSVファイル
     sub_csv : io.BytesIO
         サブのCSVファイル
-    main_column : str
-        メインファイルの結合キーとなる列名
-    sub_column : str
-        サブファイルの結合キーとなる列名
-    merge_base : str
-        結合の基準となるファイル名
-    ngram : int, optional
-        N-gramのサイズ（デフォルト: 2）
-    threshold : float, optional
-        類似度の閾値（デフォルト: 0.5）
-    
+
     Returns
     -------
     Tuple[str, str]
         結果ファイルのパスと結果の概要
     """
+    task_id = None
+    logger = None
+    result_summarization_updated = None
+    address_column = "normalized_address"
     try:
+        if logs_dir:
+            logger = get_rotating_logger(logs_dir, logger_name="E014")
+        else:
+            logs_dir = os.path.join(output_path, "logs")
+            logger = get_rotating_logger(logs_dir, logger_name="E014")
+
+        progress_percent_job = 50
+        progress_percent = 25 / len(input_source)
         if db_path:
             connect_sqllite(db_path)
             progress_percent = progress_percent / 4
-            progress_percent_job = progress_percent_job + progress_percent
-        task_id = None
         if job_id:
-            create_or_update_job(job_id, progress_percent_job)
-            task_id = create_or_update_job_task(job_id, progress_percent="0", preprocess_type="e014", error_code=None, error_msg=None, result=None)
-      
+            create_or_update_job(job_id, "51")
+
         if output_path is None:
             output_path = OUTPUT_PATH
-        
+
         output_dir = os.path.dirname(output_path)
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
 
-        # CSVファイルを読み込む
-        if hasattr(main_csv, 'name'):
-            main_df = read_data(main_csv.name)
-        else:
-            main_df = read_data(main_csv)
+        main_df = read_data(main_csv)
+        main_csv_name = os.path.splitext(os.path.basename(main_csv))[0]
+        main_flag_name = f"{main_csv_name}_flag"
 
-        if hasattr(sub_csv, 'name'):
-            sub_df = read_data(sub_csv.name)
-        else:
+        # Convert main_df to Polars before loop
+        object_cols_main = main_df.select_dtypes(include=['object']).columns
+        if len(object_cols_main) > 0:
+            main_df[object_cols_main] = main_df[object_cols_main].fillna('').astype(str)
+        main_pl = pl.from_pandas(main_df)
+        del main_df
+        gc.collect()
+        
+        for item in input_source:
+            sub_csv = f"{output_directory}/{item}_cleaned.csv"
+            if item in ["juki", "touki"]:
+                sub_csv = f"{output_directory}/{item}_residence.csv"
+
             sub_df = read_data(sub_csv)
-        
-        if '住基' in input_source and '水道' in input_source:
-            # 日付のNormalize化をし、年月を取得
-            main_start_date_col = [col for col in ['使用開始日', '住定異動年月日', '登記日付' ] if col in main_df.columns][0]
-            main_df = normalize_dates(main_df,main_start_date_col)
-            main_df['開始月'] = pd.to_datetime(main_df[main_start_date_col]).dt.strftime("%Y-%m")
-            sub_start_date_col = [col for col in ['使用開始日', '住定異動年月日', '登記日付' ] if col in sub_df.columns][0]
-            sub_df = normalize_dates(sub_df,sub_start_date_col)
-            sub_df['開始月'] = pd.to_datetime(sub_df[sub_start_date_col]).dt.strftime('%Y-%m')
 
-            # 住基の住所に閾値以上の世帯コードが結びつく住所のデータを住基、水道双方から除外
-            family_thresh = 4
-            if '世帯コード' in main_df.columns:
-                mlt_family_address_list = main_df.groupby(main_column)['世帯コード'].nunique()[main_df.groupby(main_column)['世帯コード'].nunique()>=family_thresh].index
-            else:
-                mlt_family_address_list = sub_df.groupby(main_column)['世帯コード'].nunique()[sub_df.groupby(main_column)['世帯コード'].nunique()>=family_thresh].index
-
-            main_df = main_df.loc[~main_df[main_column].isin(mlt_family_address_list)].reset_index(drop=False)
-            sub_df = sub_df.loc[~sub_df[sub_column].isin(mlt_family_address_list)].reset_index(drop=False)
-    
-        # 結合元のファイルがmain, 結合対象のファイルがsub、初めに読み込んだファイルを一旦mainにしているので、結合基準をsubにしてたら入れ替える
-        if hasattr(sub_csv, 'name') and merge_base == os.path.basename(sub_csv.name):
-            main_csv, sub_csv = sub_csv, main_csv
-            main_column, sub_column = sub_column, main_column
-            main_df, sub_df = sub_df, main_df
-
-        # データの行数、完全一致割合の計算に使用
-        data_rows = len(main_df)
-        sub_data_rows = len(sub_df)
-        
-        # アップロードされた元のファイル名を使用して拡張子を除去
-        if hasattr(main_csv, 'name'):
-            main_csv_name = os.path.splitext(os.path.basename(main_csv.name))[0]
-        else:
-            main_csv_name = os.path.splitext(os.path.basename(main_csv))[0]
-
-        # アップロードされた元のファイル名を使用して拡張子を除去
-        if hasattr(sub_csv, 'name'):
-            sub_csv_name = os.path.splitext(os.path.basename(sub_csv.name))[0]
-        else:
+            # アップロードされた元のファイル名を使用して拡張子を除去
             sub_csv_name = os.path.splitext(os.path.basename(sub_csv))[0]
 
-        # アンダーバーと数字のパターンを削除
-        sub_csv_name = re.sub(r'_\d+$', '', sub_csv_name)
+            # アンダーバーと数字のパターンを削除
+            sub_csv_name = re.sub(r"_\d+$", "", sub_csv_name)
+            sub_df.columns = [
+                f"{col}_{sub_csv_name}" if col != address_column else col
+                for col in sub_df.columns
+            ]
 
-        
-        # カラム名にファイル名を付与
-        sub_df.columns = [f"{col}_{sub_csv_name}" if col != sub_column else col for col in sub_df.columns]
-        
-        # 名寄せが判断できるflagを設定
-        main_flag_name = f'{main_csv_name}_flag'
-        sub_flag_name = f'{sub_csv_name}_flag'
-        # 初期値は全て1
-        main_df[main_flag_name] = 1
-        main_df[sub_flag_name] = 1
+            # 名寄せが判断できるflagを設定
+            sub_flag_name = f"{sub_csv_name}_flag"
 
-        # 名寄せ対象になる行を元情報として残す
-        sub_df[f'名寄せ元情報_{sub_csv_name}'] = sub_df[sub_column]
-        sub_df.rename(columns={sub_column: main_column}, inplace=True)
-        if job_id:
-            create_or_update_job(job_id, progress_percent_job)
-            create_or_update_job_task(job_id, progress_percent="30", preprocess_type="e014", error_code=None, error_msg=None, result=None, id= task_id)
-        
-        if '住基' in input_source and '水道' in input_source:
-            # 水道で1つの住所に複数の水道番号が結びついている住所を取り出す
-            multi_address_in_main = main_df[main_column].value_counts()[main_df[main_column].value_counts()>1].index
-            main_df_single = main_df.loc[~main_df[main_column].isin(multi_address_in_main)].copy().reset_index(drop=True)
-            main_df_multi = main_df.loc[main_df[main_column].isin(multi_address_in_main)].copy().reset_index(drop=True)
+            # 名寄せ対象になる行を元情報として残す
+            sub_df[f"normalized_address_{sub_csv_name}"] = sub_df[address_column]
+            if job_id:
+                progress_percent_job = progress_percent_job + progress_percent
+                create_or_update_job(job_id, progress_percent_job)
+                task_id = create_or_update_job_task(
+                    job_id,
+                    progress_percent="20",
+                    preprocess_type="e014",
+                    error_code=None,
+                    error_msg=None,
+                    result=None,
+                )
 
-            # 単一住所のレコードを住基と完全一致で結合させる
-            main_single_sub_merge = main_df_single.merge(sub_df, on=main_column, how='inner')
-
-            search_cols = [ "世帯コード", "水道番号", "使用開始日" , "使用中止日", "閉栓フラグ", "最大使用水量", 
-                        "平均使用水量", "最小使用水量", "合計使用水量", "水道使用量変化率", "開始月"]
-            
-            merged_df_col_dict = {}
-
-            for colname in search_cols:
-                tar_colname_list = [ col for col in main_single_sub_merge.columns if colname in col ]
-                if len(tar_colname_list) > 0:
-                    merged_df_col_dict[colname] = tar_colname_list[0]
-                else:
-                    merged_df_col_dict[colname] = colname
-                
-            # 複数住所のレコードを水道使用開始月と住定年月が同じのレコードのみで結びつける（family_thresh以上は排除）
-            main_multi_sub_merge = pd.DataFrame(columns = main_single_sub_merge.columns)
-            no_juki = []
-            over_thresh_building = []
-            for address in multi_address_in_main:
-                tar_main = main_df_multi.loc[main_df_multi[main_column]==address].sort_values([main_column,merged_df_col_dict['開始月']]).reset_index(drop=True)
-                tar_sub = sub_df.loc[sub_df[main_column]==address].sort_values([main_column,f"開始月_{sub_csv_name}"]).reset_index(drop=True)
-                if len(tar_sub) == 0:
-                    no_juki.append(address)
-                elif len(tar_sub) == 1:
-                    tar_merged = tar_main.iloc[[-1]].merge(tar_sub, on=main_column, how='inner')
-                    main_multi_sub_merge = pd.concat([main_multi_sub_merge,tar_merged ])
-                elif len(tar_sub) >= family_thresh:
-                    over_thresh_building.append(address)
-                else:
-                    tar_merged = tar_main.merge(tar_sub.drop(main_column, axis=1), left_on=merged_df_col_dict['開始月'], right_on=f"開始月_{sub_csv_name}",  how='inner')
-                    main_multi_sub_merge = pd.concat([main_multi_sub_merge,tar_merged ])
-    
-            # 上記二つのマージ済みデータを合算
-            try:
-                juki_suido_merged = pd.concat([main_single_sub_merge.loc[main_single_sub_merge[merged_df_col_dict["世帯コード"]].notnull()],
-                                          main_multi_sub_merge.loc[main_multi_sub_merge[merged_df_col_dict["世帯コード"]].notnull()]], ignore_index=True)
-            except NameError:
-                juki_suido_merged = main_single_sub_merge.loc[main_single_sub_merge[merged_df_col_dict["世帯コード"]].notnull()].reset_index()
-        
-            # 一つの世帯コードに複数の水道番号が紐づいている場合、水道番号を一つに集計
-            setai_multi_ids = juki_suido_merged.groupby(merged_df_col_dict["世帯コード"])[merged_df_col_dict['水道番号']].count()[juki_suido_merged.groupby(merged_df_col_dict["世帯コード"])[merged_df_col_dict['水道番号']].count()>1].index
-
-            juki_suido_merged_single = juki_suido_merged.loc[~juki_suido_merged[merged_df_col_dict["世帯コード"]].isin(setai_multi_ids)]
-            juki_suido_merged_multi = juki_suido_merged.loc[juki_suido_merged[merged_df_col_dict["世帯コード"]].isin(setai_multi_ids)]
-        
-            suido_groupby_calcs = {
-                merged_df_col_dict['水道番号']:'first', '正規化住所':pd.Series.mode, merged_df_col_dict['使用開始日']:'max',
-                merged_df_col_dict['使用中止日']:'max', merged_df_col_dict['閉栓フラグ']:'max', 
-                merged_df_col_dict['最大使用水量']:'max', merged_df_col_dict['平均使用水量']:'mean', 
-                merged_df_col_dict['最小使用水量']:'min', merged_df_col_dict['合計使用水量']:'sum', merged_df_col_dict['水道使用量変化率']:'mean', 
-                merged_df_col_dict['開始月']:'min'
-            }
-            juki_suido_merged_multi[merged_df_col_dict["使用開始日"]] = pd.to_datetime(juki_suido_merged_multi[merged_df_col_dict["使用開始日"]])
-            juki_suido_merged_multi[merged_df_col_dict["使用中止日"]] = pd.to_datetime(juki_suido_merged_multi[merged_df_col_dict["使用中止日"]])
-            juki_suido_merged_multi[merged_df_col_dict["開始月"]] = pd.to_datetime(juki_suido_merged_multi[merged_df_col_dict["開始月"]])
-            juki_suido_merged_multi[merged_df_col_dict["閉栓フラグ"]] = juki_suido_merged_multi[merged_df_col_dict["閉栓フラグ"]].astype('bool')
-
-            juki_suido_merged_multi_grpd = juki_suido_merged_multi.groupby(merged_df_col_dict["世帯コード"])[list(suido_groupby_calcs.keys())].agg(suido_groupby_calcs).reset_index(drop=False)
-            juki_suido_merged_multi_organized = juki_suido_merged_multi.drop(list(suido_groupby_calcs.keys()),axis=1).drop_duplicates(merged_df_col_dict["世帯コード"]).merge(juki_suido_merged_multi_grpd, on=merged_df_col_dict["世帯コード"])
-
-            df_merge = pd.concat([juki_suido_merged_single,juki_suido_merged_multi_organized], ignore_index=True)
-    
-        else:
             # 完全一致による結合
-            sub_column_nenamed = [ col for col in sub_df.columns if sub_column in col ][0]
-            sub_df = sub_df.drop_duplicates(sub_column_nenamed, keep='first')
-            if ngram == 0:
-                df_merge = main_df.merge(sub_df, on=main_column, how='left')
-            else:
-                df_merge = main_df.merge(sub_df, on=main_column, how='inner')
-            
-        merged_rows = len(df_merge)    # 完全一致できた行数
-        # N-gramで名寄せできた行数をカウント
-        ngram_rows = 0
-        similarity_scores = []  # 類似度スコアを保存するリスト
-    
-        if ngram != 0:
-            # 未結合のデータを抽出
-            main_df = main_df[~main_df[main_column].isin(df_merge[main_column])]
-            sub_df = sub_df[~sub_df[main_column].isin(df_merge[main_column])]
-            main_df = main_df.reset_index(drop=True)
-            sub_df = sub_df.reset_index(drop=True)
-            if len(main_df) > 0 and len(sub_df) > 0:
-                if job_id:
-                    create_or_update_job(job_id, progress_percent_job)
-                    create_or_update_job_task(job_id, progress_percent="40", preprocess_type="e014", error_code=None, error_msg=None, result=None, id= task_id)
-                # N-gramで類似度を計算する準備
-                vectorizer = CountVectorizer(analyzer='char', ngram_range=(ngram, ngram))
-                main_df_ngram_matrix = vectorizer.fit_transform(main_df[main_column].astype(str))
-                sub_df_ngram_matrix = vectorizer.transform(sub_df[main_column].astype(str))
-        
-                # 疎行列に変換してメモリ効率を改善
-                main_df_ngram_matrix = csr_matrix(main_df_ngram_matrix)
-                sub_df_ngram_matrix = csr_matrix(sub_df_ngram_matrix)
-        
-                # バッチ処理による類似度計算
-                for start in range(0, main_df_ngram_matrix.shape[0], batch_size):
-                    end = min(start + batch_size, main_df_ngram_matrix.shape[0])
-        
-                    # バッチ単位で類似度を計算
-                    batch_similarities = cosine_similarity(main_df_ngram_matrix[start:end], sub_df_ngram_matrix)
-                    
-                    # バッチ内の各行ごとに処理
-                    for i, similarities in enumerate(batch_similarities):
-                        top_indices = similarities.argsort()[-3:][::-1]  # 上位3件を取得
-        
-                        if similarities[top_indices[0]] >= threshold:
-                            row_index = start + i  # バッチの中での行番号をグローバルに変換
-                            for col in sub_df.columns:
-                                main_df.at[row_index, col] = sub_df.iloc[top_indices[0]][col]
-                            similarity_scores.append(similarities[top_indices[0]])  # 類似度スコアを追加
-                            ngram_rows += 1  # この行が正しく名寄せされた場合にカウント
-                        else:
-                            row_index = start + i
-                            main_df.at[row_index, f'名寄せ元情報_{sub_csv_name}'] = ""
-                            main_df.at[row_index, f'{sub_flag_name}'] = 0
-                            similarity_scores.append(similarities[top_indices[0]])  # 閾値未満の場合スコアは0
-                        
-                # 類似度スコアを結果データフレームに追加
-                main_df[f'similarity_score_{sub_csv_name}'] = similarity_scores
-            
-                # 結果のデータフレームを作成
-                result_df = pd.concat([df_merge, main_df], axis=0, ignore_index=True)
-        
-                # flag情報を最後に持ってくる
-                result_df = result_df[[col for col in result_df.columns if col != main_flag_name] + [main_flag_name]]
-                
-                # カラム名にflagを含むカラムを最後に移動
-                result_df[main_flag_name] = result_df[main_flag_name].astype(int)
-                result_df[sub_flag_name] = result_df[sub_flag_name].astype(int)
-                
-                flag_columns = [col for col in result_df.columns if 'flag' in col]
-                other_columns = [col for col in result_df.columns if 'flag' not in col]
-                result_df = result_df[other_columns + flag_columns]
-            else:
-                result_df = df_merge
-        else:
-            result_df = df_merge
-            
-        if job_id:
-            create_or_update_job(job_id, progress_percent_job)
-            create_or_update_job_task(job_id, progress_percent="90", preprocess_type="e014", error_code=None, error_msg=None, result=None, id= task_id)
-        # 結果をCSVファイルとして保存
-        saved_file_path = save_csv(result_df, output_path)
-        
-        # 結果の表示
-        complete_match_ratio = f'結合元データとの完全一致割合: {merged_rows / data_rows * 100:.2f}%'
-        if ngram != 0:
-            threshold_match_ratio = f'結合元データとの閾値以上結合割合: {(merged_rows + ngram_rows) / data_rows * 100:.2f}%'
-        else:
-            threshold_match_ratio = f'結合元データとの閾値以上結合割合: {merged_rows / data_rows * 100:.2f}%'
-        sub_complete_match_ratio = f'結合先データとの完全一致割合: {merged_rows / sub_data_rows * 100:.2f}%'
-        
-        if ngram == 0:
-            ngram_rows = 0
-            threshold_match_ratio = complete_match_ratio
-        res = {
-            'joining_rate': (merged_rows + ngram_rows) / data_rows * 100,
-            'input_source': input_source
-        }
-        if job_id:
-            create_or_update_job_task(job_id, progress_percent="100", preprocess_type="e014", error_code=None, error_msg=None, result=json.dumps(res, ensure_ascii=False), id= task_id, is_finish=True)
+            sub_df = sub_df.drop_duplicates(address_column, keep="first")
+            if sub_df.empty:
+                raise Exception(
+                    f"No data found in the {item} file"
+                )  # item is juki or touki or geocoding
+            if main_pl.is_empty():
+                raise Exception(
+                    "No data found in the suido_residence file"
+                )
 
-        return saved_file_path, f"{complete_match_ratio}\n{threshold_match_ratio}\n{sub_complete_match_ratio}"
+            sub_data_rows = len(sub_df)
+
+            # Clean sub_df before converting to Polars
+            object_cols_sub = sub_df.select_dtypes(include=['object']).columns
+            if len(object_cols_sub) > 0:
+                sub_df[object_cols_sub] = (
+                    sub_df[object_cols_sub].fillna('').astype(str)
+                )
+
+            # Convert sub_df to Polars
+            sub_pl = pl.from_pandas(sub_df)
+            del sub_df
+
+            merged_pl = main_pl.join(sub_pl, on=address_column, how="left")
+            
+            # Create indicator column (1 if matched, 0 if not)
+            # Check if any column from sub_df (except join key) has non-null value
+            sub_cols = [col for col in sub_pl.columns if col != address_column]
+
+            del sub_pl
+            gc.collect()
+
+            if job_id:
+                create_or_update_job(job_id, progress_percent_job)
+                create_or_update_job_task(
+                    job_id,
+                    progress_percent="50",
+                    preprocess_type="e014",
+                    error_code=None,
+                    error_msg=None,
+                    result=None,
+                    id=task_id,
+                )
+            
+            if sub_cols:
+                merged_pl = merged_pl.with_columns(
+                    pl.when(pl.col(sub_cols[0]).is_not_null())
+                    .then(pl.lit(1))
+                    .otherwise(pl.lit(0))
+                    .alias(sub_flag_name)
+                )
+            else:
+                merged_pl = merged_pl.with_columns(
+                    pl.lit(0).alias(sub_flag_name)
+                )
+            
+            if main_csv_name == "suido_residence":
+                merged_pl = merged_pl.with_columns(
+                    pl.lit(1).alias(main_flag_name)
+                )
+
+            if task_id_summarization and sub_csv_name == "geocoding_cleaned":
+                # Check if result_summarization is string, then load it
+                if isinstance(result_summarization, str):
+                    result_summarization = json.loads(result_summarization)
+                elif not isinstance(result_summarization, dict):
+                    result_summarization = {}
+
+                # Calculate record combinations total (all records)
+                record_combinations_total = len(merged_pl)
+                
+                # Calculate record combinations statistics
+                # Get flag columns
+                flag_cols = {
+                    'suido_residence_flag': 'has_water_supply',
+                    'juki_residence_flag': 'has_juki_registry',
+                    'touki_residence_flag': 'has_touki_registry'
+                }
+
+                # Create flags dict for checking existence in dataframe
+                existing_flags = {}
+                for flag_col in flag_cols.keys():
+                    if flag_col in merged_pl.columns:
+                        existing_flags[flag_col] = flag_cols[flag_col]
+
+                # Calculate estimation target total count
+                # (records with at least one flag = 1)
+                if existing_flags:
+                    condition = None
+                    for flag_col in existing_flags.keys():
+                        if condition is None:
+                            condition = pl.col(flag_col) == 1
+                        else:
+                            condition = condition | (pl.col(flag_col) == 1)
+                    estimation_target_total_count = merged_pl.filter(
+                        condition
+                    ).height
+                else:
+                    estimation_target_total_count = 0
+
+                # Group by all flag columns and count
+                if existing_flags:
+                    group_cols = list(existing_flags.keys())
+                    combinations_df = merged_pl.group_by(group_cols).agg(
+                        pl.count().alias('count')
+                    ).sort(group_cols)
+
+                    # Convert to pandas for easier iteration
+                    combinations_pd = combinations_df.to_pandas()
+
+                    record_combinations = []
+                    for _, row in combinations_pd.iterrows():
+                        combination = {}
+                        for flag_col, field_name in existing_flags.items():
+                            combination[field_name] = bool(row[flag_col] == 1)
+                        combination['count'] = int(row['count'])
+                        if record_combinations_total > 0:
+                            percentage = (
+                                row['count'] / record_combinations_total * 100
+                            )
+                        else:
+                            percentage = 0.0
+                        combination['percentage'] = round(percentage, 2)
+                        record_combinations.append(combination)
+                else:
+                    record_combinations = []
+
+                # Update result_summarization with new fields
+                result_summarization['estimation_target_total_count'] = (
+                    estimation_target_total_count
+                )
+                result_summarization['record_combinations'] = (
+                    record_combinations
+                )
+                result_summarization['record_combinations_total'] = (
+                    record_combinations_total
+                )
+                
+                _, result_summarization_updated = create_or_update_summarization_job_task(
+                    job_id,
+                    "30",
+                    "preprocess_summary",
+                    json.dumps(result_summarization),
+                    id=task_id_summarization,
+                    is_finish=False,
+                )
+
+            if job_id:
+                create_or_update_job_task(
+                    job_id,
+                    progress_percent="70",
+                    preprocess_type="e014",
+                    error_code=None,
+                    error_msg=None,
+                    result=None,
+                    id=task_id,
+                )
+
+            # Count unique matched values
+            has_match = (merged_pl[sub_flag_name] == 1).any()
+            if has_match:
+                matched_rows = merged_pl.filter(pl.col(sub_flag_name) == 1)
+                total_match = matched_rows[address_column].n_unique()
+            else:
+                total_match = 0
+            sub_participation_rate = (
+                total_match / sub_data_rows * 100 if sub_data_rows > 0 else 0
+            )
+
+            file_match = None
+            if item == "juki":
+                file_match = "「水道閉開栓状況」に「住民基本台帳」を住所で結合（A） "
+            elif item == "touki":
+                file_match = "Aに「登記情報」を住所で結合（B） "
+            elif item == "geocoding":
+                if len(input_source) > 2:
+                    file_match = "Bに「ジオコーディング済データ」を住所で結合（C） "
+                else:
+                    file_match = "Aに「ジオコーディング済データ」を住所で結合（B） "
+            res = {
+                "joining_rate": sub_participation_rate,  # sub側の参加率
+                "input_source": file_match,
+                "success_rate": f"{total_match}件/{sub_data_rows}件中",
+            }
+            if job_id:
+                create_or_update_job_task(
+                    job_id,
+                    progress_percent="100",
+                    preprocess_type="e014",
+                    error_code=None,
+                    error_msg=None,
+                    result=json.dumps(res, ensure_ascii=False),
+                    id=task_id,
+                    is_finish=True,
+                )
+            
+            # Drop redundant normalized_address_*
+            if item == "optional_data_source":
+                drop_col = "normalized_address_optional_data_source_cleaned"
+            elif item == "vacant_house":
+                drop_col = "normalized_address_vacant_house_cleaned"
+            else:
+                drop_col = None
+            if drop_col and drop_col in merged_pl.columns:
+                merged_pl = merged_pl.drop(drop_col)
+
+            # Keep merged_pl as main_pl for next iteration
+            main_pl = merged_pl
+            gc.collect()
+
+        # Convert to Pandas
+        main_df = main_pl.to_pandas()
+        del main_pl
+        gc.collect()
+
+        # 結果をCSVファイルとして保存
+        save_csv(main_df, output_path)
+        return result_summarization_updated
     except Exception as e:
+        if logger:
+            logger.error("E014 failed:\n%s", traceback.format_exc())
         if ERROR_CODE is None:
             set_error(ERROR_00013)
-        if task_id is not None:
-            create_or_update_job_task(job_id, progress_percent="", preprocess_type="e014", error_code=ERROR_CODE, error_msg=ERROR_MSG, result=json.dumps({}), id= task_id, is_finish=True)
+        if task_id:
+            create_or_update_job_task(
+                job_id,
+                progress_percent="",
+                preprocess_type="e014",
+                error_code=ERROR_CODE,
+                error_msg=ERROR_MSG,
+                result=json.dumps({}),
+                id=task_id,
+                is_finish=True,
+            )
         raise Exception("テキストマッチング処理中にエラーが発生しました。")
+
+
+def convert_8digit_float_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    20170818.0 のような float 表現をすべて int (20170818) に正規化する。
+    対象は「8桁の数字の形に変換可能なセル」すべて。
+    """
+    for col in df.columns:
+        ser = df[col].fillna("").astype(str).astype(object).str.strip()
+
+        # float化→整数化を試みる
+        ser2 = ser.str.replace(".0$", "", regex=True)
+
+        # 8桁数字のみ変換対象
+        mask = ser2.str.match(r"^\d{8}$")
+
+        if mask.any():
+            df.loc[mask, col] = ser2.loc[mask]
+
+    return df
+
+
+def hensu_150(input_csv: str, output_csv: str, base_date_str: str):
+    try:
+        df = read_data(input_csv)
+        # add_flags_frame / calc_jutei_age_water を除去:
+        # 新パイプライン(aggregate_usage + add_water_features)が同等の特徴量を
+        # 正しく計算済みであり、これらは旧式の再計算で値を上書きしていた
+        df = convert_8digit_float_cols(df)
+        df = add_structure_and_reason_flags(df, base_date_str)
+
+        output_path = save_csv(df, output_csv)
+        return output_path
+    except Exception as e:
+        traceback.print_exc()
+        print(e)
+        raise Exception(e)
+
+
+def parse_yyyymmdd(value: str) -> Optional[datetime]:
+    """YYYYMMDD / YYYYMMDD.0 / YYYY/MM/DD / YYYY-MM-DD などを許容"""
+    if pd.isna(value):
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+
+    # 末尾の .0 を削る（20220101.0 → 20220101）
+    if s.endswith(".0"):
+        s = s[:-2]
+
+    # 純粋な8桁数字 YYYYMMDD
+    if s.isdigit() and len(s) == 8:
+        try:
+            return datetime.strptime(s, "%Y%m%d")
+        except ValueError:
+            return None
+
+    # スラッシュ・ハイフン形式も試す
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%Y.%m.%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            pass
+
+    return None
+
+
+def parse_base_date(base_date_str: str) -> pd.Timestamp:
+    base_date_str = str(base_date_str).strip()
+    if re.fullmatch(r"\d{8}", base_date_str):
+        dt = pd.to_datetime(base_date_str, format="%Y%m%d", errors="coerce")
+    else:
+        dt = pd.to_datetime(base_date_str, errors="coerce")
+    if pd.isna(dt):
+        raise ValueError(
+            f"基準日 '{base_date_str}' を日付として解釈できません。"
+        )
+    return dt
+
+
+def parse_yyyymmdd_series(series: pd.Series) -> pd.Series:
+    # Convert to object dtype first to avoid issues with string dtype
+    s = series.fillna('').astype(str).astype(object).str.strip()
+    mask_8 = s.str.match(r"^\d{8}$")
+    result = pd.Series(pd.NaT, index=s.index)
+    if mask_8.any():
+        result.loc[mask_8] = pd.to_datetime(
+            s.loc[mask_8], format="%Y%m%d", errors="coerce"
+        )
+    return result
+
+
+def pick_reason_and_date_near_base(
+    df: pd.DataFrame, base_date: pd.Timestamp
+) -> pd.DataFrame:
+    # JSON形式のevents_jsonカラムからデータを取得
+    if "events_json_touki_residence" not in df.columns:
+        df["date_registration_event"] = ""
+        df["registration_reason"] = ""
+        df["days_since_registration_event"] = ""
+        return df
+
+    target_pattern = re.compile("(相続|遺贈|贈与|売買|公売|競売)")
+
+    all_items = []
+
+    # Use itertuples for better performance than iterrows
+    for row in df.itertuples():
+        idx = row.Index
+        events_json = getattr(row, "events_json_touki_residence", "")
+        # Check for None, pd.NA, empty string (avoid boolean conversion of NA)
+        try:
+            if pd.isna(events_json):
+                continue
+        except (TypeError, ValueError):
+            pass
+        if not events_json or (isinstance(events_json, str) and not events_json.strip()):
+            continue
+
+        try:
+            # Handle double-quoted JSON from CSV (pandas escape)
+            # Replace double quotes with single quotes if needed
+            if isinstance(events_json, str):
+                # Fix double quotes that may occur from CSV reading
+                # Replace "" with " (but be careful not to break valid JSON)
+                events_json_clean = events_json.replace('""', '"')
+                events = json.loads(events_json_clean)
+            else:
+                events = events_json
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if not isinstance(events, list):
+            continue
+
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+                
+            # Get values, handling None/null from JSON
+            reason_raw = event.get("reason")
+            date_str_raw = event.get("date")
+            
+            # Convert None to empty string, then to string and strip
+            reason = str(reason_raw).strip() if reason_raw is not None else ""
+            date_str = str(date_str_raw).strip() if date_str_raw is not None else ""
+
+            if not reason or not date_str:
+                continue
+
+            # Check if reason matches target pattern
+            if not target_pattern.search(reason):
+                continue
+
+            # Parse date - use parse_yyyymmdd directly for single value
+            try:
+                # Try parse_yyyymmdd first (faster for single value)
+                date_val = None
+                date_str_clean = date_str.strip()
+                
+                # Check if it's 8-digit format
+                if date_str_clean.isdigit() and len(date_str_clean) == 8:
+                    try:
+                        date_val = pd.to_datetime(date_str_clean, format="%Y%m%d", errors="coerce")
+                    except Exception:
+                        pass
+                
+                # Fallback to parse_yyyymmdd_series if needed
+                if pd.isna(date_val):
+                    date_val = parse_yyyymmdd_series(pd.Series([date_str])).iloc[0]
+            except Exception:
+                continue
+
+            if pd.isna(date_val) or date_val > base_date:
+                continue
+
+            all_items.append({
+                "row_idx": idx,
+                "date": date_val,
+                "reason": str(reason).strip(),
+            })
+
+    if not all_items:
+        df["date_registration_event"] = ""
+        df["registration_reason"] = ""
+        df["days_since_registration_event"] = ""
+        return df
+
+    merged = pd.DataFrame(all_items)
+
+    idxmax = merged.groupby("row_idx")["date"].idxmax()
+    best = merged.loc[idxmax].set_index("row_idx")
+
+    best_date = best["date"].reindex(df.index)
+    best_reason = best["reason"].reindex(df.index)
+
+    df["date_registration_event"] = best_date.dt.strftime("%Y/%m/%d").fillna("")
+    df["registration_reason"] = best_reason.fillna("")
+
+    df["days_since_registration_event"] = ""
+    mask_valid = best_date.notna()
+    if mask_valid.any():
+        df.loc[mask_valid, "days_since_registration_event"] = (
+            (base_date - best_date[mask_valid])
+            .dt.days.astype("Int64")
+            .astype(str)
+        )
+
+    return df
+
+
+def add_structure_and_reason_flags(
+    df: pd.DataFrame, base_date_str: str
+) -> pd.DataFrame:
+
+    base_date = parse_base_date(base_date_str)
+
+    # 0. 登記事由発生日・登記事由・経過日
+    df = pick_reason_and_date_near_base(df, base_date)
+    # ==========================
+    # 1. 登記構造 → 構造フラグ
+    # ==========================
+    # Parse structure from JSON (first event's structure)
+    structure_col = pd.Series([""] * len(df), index=df.index)
+    if "events_json_touki_residence" in df.columns:
+        # Use itertuples for better performance
+        for row in df.itertuples():
+            idx = row.Index
+            events_json = getattr(row, "events_json_touki_residence", "")
+            # Check for None, pd.NA, empty string (avoid boolean conversion of NA)
+            try:
+                if pd.isna(events_json):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if events_json and (not isinstance(events_json, str) or events_json.strip()):
+                try:
+                    # Handle double-quoted JSON from CSV
+                    if isinstance(events_json, str):
+                        events_json_clean = events_json.replace('""', '"')
+                        events = json.loads(events_json_clean)
+                    else:
+                        events = events_json
+                    if isinstance(events, list) and len(events) > 0:
+                        structure_col.loc[idx] = str(events[0].get("structure", "")).strip()
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    
+    # Fallback to old column if exists (for backward compatibility)
+    if "structure_1_touki_residence" in df.columns:
+        mask_missing = structure_col == ""
+        structure_col.loc[mask_missing] = (
+            df.loc[mask_missing, "structure_1_touki_residence"]
+            .fillna("").astype(str).astype(object).str.strip()
+        )
+
+    mask_cb = structure_col.str.startswith("コンクリートブロック")
+    mask_brick = structure_col.str.startswith(
+        "煉瓦"
+    ) | structure_col.str.startswith("レンガ")
+    mask_rc = structure_col.str.startswith(
+        "鉄筋コンクリート"
+    ) | structure_col.str.startswith("RC造")
+    mask_steel = (
+        structure_col.str.startswith("鉄骨")
+        | structure_col.str.startswith("軽量鉄骨")
+        | structure_col.str.startswith("S造")
+    )
+    mask_wood = structure_col.str.startswith("木")
+    mask_soil = structure_col.str.startswith("土")
+
+    mask_any_structure = structure_col.str.contains(r"[一-龥ぁ-ゟァ-ヿ]")
+    mask_other = mask_any_structure & ~(
+        mask_cb | mask_brick | mask_rc | mask_steel | mask_wood | mask_soil
+    )
+
+    for col in [
+        "flag_concreteblock",
+        "flag_brick",
+        "flag_reinforcedconcreteconstruction",
+        "flag_steelframe",
+        "flag_wood",
+        "flag_earthen",
+        "flag_otherstructures",
+    ]:
+        df[col] = ""
+
+    df.loc[mask_cb, "flag_concreteblock"] = "1"
+    df.loc[mask_brick, "flag_brick"] = "1"
+    df.loc[mask_rc, "flag_reinforcedconcreteconstruction"] = "1"
+    df.loc[mask_steel, "flag_steelframe"] = "1"
+    df.loc[mask_wood, "flag_wood"] = "1"
+    df.loc[mask_soil, "flag_earthen"] = "1"
+    df.loc[mask_other, "flag_otherstructures"] = "1"
+
+    # 2. 登記事由_内容* → 種別フラグ（相続/贈与/売買/差押）
+    # Parse all reasons from JSON
+    concat_reason = pd.Series([""] * len(df), index=df.index)
+    if "events_json_touki_residence" in df.columns:
+        # Use itertuples for better performance
+        for row in df.itertuples():
+            idx = row.Index
+            events_json = getattr(row, "events_json_touki_residence", "")
+            # Check for None, pd.NA, empty string (avoid boolean conversion of NA)
+            try:
+                if pd.isna(events_json):
+                    continue
+            except (TypeError, ValueError):
+                pass
+            if events_json and (not isinstance(events_json, str) or events_json.strip()):
+                try:
+                    # Handle double-quoted JSON from CSV
+                    if isinstance(events_json, str):
+                        events_json_clean = events_json.replace('""', '"')
+                        events = json.loads(events_json_clean)
+                    else:
+                        events = events_json
+                    if isinstance(events, list):
+                        reasons = [
+                            str(e.get("reason", "")).strip() 
+                            for e in events 
+                            if isinstance(e, dict) and e.get("reason")
+                        ]
+                        concat_reason.loc[idx] = " ".join(reasons)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    
+    # Fallback to old columns if exists (for backward compatibility)
+    reason_cols = [c for c in df.columns if c.startswith("extracted_registration_reason")]
+    if reason_cols:
+        mask_missing = concat_reason == ""
+        old_reasons = (
+            df.loc[mask_missing, reason_cols].astype(str).fillna("").agg(" ".join, axis=1)
+        )
+        concat_reason.loc[mask_missing] = old_reasons
+    elif "registration_reason" in df.columns:
+        mask_missing = concat_reason == ""
+        concat_reason.loc[mask_missing] = df.loc[mask_missing, "registration_reason"].astype(str).fillna("")
+
+    for col in ["flag_inheritance", "flag_gift", "flag_sale", "flag_seizure"]:
+        df[col] = ""
+
+    df.loc[
+        concat_reason.str.contains("相続")
+        | concat_reason.str.contains("遺贈"),
+        "flag_inheritance",
+    ] = "1"
+    df.loc[concat_reason.str.contains("贈与"), "flag_gift"] = "1"
+    df.loc[concat_reason.str.contains("売買"), "flag_sale"] = "1"
+    df.loc[
+        concat_reason.str.contains("公売")
+        | concat_reason.str.contains("競売"),
+        "flag_seizure",
+    ] = "1"
+
+    return df
+
+
+def calc_jutei_age_water(df: pd.DataFrame):
+    # ==================================================
+    # 3) 計量水量_* から 最大 / 平均 / 合計 使用水量
+    # ==================================================
+    usage_cols = [c for c in df.columns if c.startswith("suido_usage_")]
+
+    # 初期化（列がなくても動くようにしておく）
+    df["max_water_usage"] = ""
+    df["avg_water_usage"] = ""
+    df["average_waterusage_person"] = ""
+
+    if not usage_cols:
+        print(
+            "計量水量_ で始まるカラムが見つかりません（使用水量集計はスキップ）"
+        )
+    else:
+        print("対象となる計量水量カラム:", usage_cols)
+
+        usage_df = pd.DataFrame(index=df.index)
+        for col in usage_cols:
+            # 数値に変換（カンマ除去を想定、数字以外は NaN）
+            s = df[col].fillna("").astype(str).astype(object).str.replace(",", "", regex=False)
+            usage_df[col] = pd.to_numeric(s, errors="coerce")
+
+        # 行ごとに、少なくとも1つ有効な数値があるか
+        has_any_value = usage_df.notna().any(axis=1)
+
+        # 最大
+        max_usage = usage_df.max(axis=1, skipna=True)
+        df["max_water_usage"] = max_usage.where(has_any_value, "").astype(object)
+        # 平均
+        mean_usage = usage_df.mean(axis=1, skipna=True)
+        df["avg_water_usage"] = mean_usage.where(has_any_value, "").astype(object)
+
+        # 一人当たり平均検針水量 / 一人当たり検針水量
+        household_col = "household_size_juki_residence"
+        if household_col in df.columns:
+            hh_raw = (
+                df[household_col].fillna("").astype(str).astype(object).str.replace(",", "", regex=False)
+            )
+            hh = pd.to_numeric(hh_raw, errors="coerce")
+
+            valid = has_any_value & hh.gt(0) & mean_usage.notna()
+            per_capita = (mean_usage / hh).where(valid)
+
+            df["average_waterusage_person"] = per_capita.where(
+                per_capita.notna(), ""
+            ).astype(object)
+        else:
+            print(
+                "異動反映後世帯人数 カラムが見つからないため、一人当たり平均使用水量は作成しません。"
+            )
+            df["average_waterusage_person"] = ""
+
+    return df
+
 
 def save_csv(df, path):
     """
     データフレームをCSVファイルとして保存する
-    
+
     Parameters
     ----------
     df : pandas.DataFrame
@@ -461,9 +1457,9 @@ def save_csv(df, path):
     """
     # 絶対パスに変換
     abs_path = os.path.abspath(path)
-    
+
     # 試行するエンコーディングのリスト
-    encodings = ['utf-8-sig']
+    encodings = ["utf-8-sig"]
     for encoding in encodings:
         try:
             # 各エンコーディングでCSVファイルとして保存を試みる
@@ -471,16 +1467,19 @@ def save_csv(df, path):
             return abs_path
         except Exception as e:
             set_error(ERROR_00012, abs_path, encoding)
-    
+
     return None
+
 
 def set_error(value, param_st1=None, param_st2=None):
     global ERROR_CODE
     global ERROR_MSG
-    ERROR_CODE = value['code']
+    ERROR_CODE = value["code"]
     if param_st1 is not None and param_st2 is not None:
-        ERROR_MSG = value['message'].format(param_st1=param_st1, param_st2=param_st2)
+        ERROR_MSG = value["message"].format(
+            param_st1=param_st1, param_st2=param_st2
+        )
     elif param_st1 is not None:
-        ERROR_MSG = value['message'].format(param_st1=param_st1)
+        ERROR_MSG = value["message"].format(param_st1=param_st1)
     else:
-        ERROR_MSG = value['message']
+        ERROR_MSG = value["message"]

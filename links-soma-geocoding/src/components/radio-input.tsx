@@ -43,6 +43,8 @@ export const RadioInput = (): JSX.Element => {
               onChange={(_, data) => field.onChange(data.value)}
             >
               <Radio value="aws" label="AWSジオコーディングAPI" />
+              <Radio value="ntt" label="NTTジオコーディングAPI" />
+              <Radio value="abr" label="ABRジオコーディング" />
               {/* <Radio value="zenrin" label="ゼンリンAPI" /> */}
             </RadioGroup>
           )}
