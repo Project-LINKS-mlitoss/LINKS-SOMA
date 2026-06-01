@@ -714,12 +714,6 @@ a { color: var(--c-primary); }
   margin-top: 1px;
   font-weight: 400;
 }
-.hero-cta-note {
-  margin-top: -4px;
-  color: var(--c-text-muted);
-  font-size: 12px;
-}
-
 .aux-cta {
   margin-top: var(--space-5);
   padding: var(--space-4) var(--space-5);
