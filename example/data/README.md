@@ -6,6 +6,8 @@
 
 詳細な操作方法については、LINKS SOMAの操作マニュアルをご参照ください。
 
+[データをダウンロード](https://storage.googleapis.com/links-soma/example/%E3%82%B5%E3%83%B3%E3%83%97%E3%83%AB%E3%83%87%E3%83%BC%E3%82%BF.zip)（36.9MB）
+
 ## 利用時の注意事項
 
 * サンプルデータを利用する際は、**「関東地方」版のSOMA**をご利用ください。
