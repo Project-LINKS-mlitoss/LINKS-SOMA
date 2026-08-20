@@ -17,6 +17,7 @@ import { CHART_COLORS } from "../../../../../shared/config/chart-colors";
 import { type PieView } from "../../../types/models/view";
 import { type ChartExportHandle } from "../../../types/chart-export";
 import { useFetchPieChartProps } from "../../../hooks";
+import { resolveChartAggregation } from "../../../util/chart-aggregation";
 import { QueryHeader, QueryHeaderWrapper } from "../../shared/query-header";
 import { useChartCsvExport } from "../../../hooks/use-chart-csv-export";
 import { LoadingChart } from "./loading-chart";
@@ -42,18 +43,22 @@ export const ViewPie = forwardRef<ChartExportHandle, Props>(({ view }, ref) => {
   const label = view.parameters.find((p) => p.key === "label");
   const value = view.parameters.find((p) => p.key === "value");
 
-  const groupAggregation = view.parameters.find(
-    (p) => p.type === "group_aggregation",
-  );
+  const groupConditions = view.parameters.filter((p) => p.type === "group");
+
+  /** 未設定のビューでも取得側と同じ既定になるよう共通の解決関数を使う */
+  const aggregation = resolveChartAggregation(view.parameters, view.style);
 
   const isPercentValue =
-    groupAggregation?.value === "avg" && chartProps.yAxisColumn.unit === "%";
-  const data = chartProps.data.map((d) => ({
-    ...d,
-    y: isPercentValue
-      ? Math.floor(d.y * 1000) / 10
-      : Number.parseFloat(d.y.toFixed(1)), // floatな値を扱うことがあるため、桁が溢れないように小数点第一位まで表示する
-  }));
+    aggregation === "avg" && chartProps.yAxisColumn.unit === "%";
+  const data = chartProps.data
+    // 値を持たない行は扇形にできないため除外する
+    .filter((d) => d.y !== null && d.y !== undefined)
+    .map((d) => ({
+      ...d,
+      y: isPercentValue
+        ? Math.floor(d.y * 1000) / 10
+        : Number.parseFloat(d.y.toFixed(1)), // floatな値を扱うことがあるため、桁が溢れないように小数点第一位まで表示する
+    }));
 
   const { handleChartCsvExport } = useChartCsvExport({
     view,
@@ -87,6 +92,15 @@ export const ViewPie = forwardRef<ChartExportHandle, Props>(({ view }, ref) => {
 
   if (!label || !value) {
     return <div>パラメーターの値を正しく設定してください</div>;
+  }
+
+  /**
+   * ラベルのグループがないと1行が1つの扇形になり、内訳の図として成立しない。
+   * 実データでは建物数がそのまま扇形の数になり描画も重い。
+   * 設定を促す案内はビュー側（view.tsx）が出すため、ここでは描画しない。
+   */
+  if (groupConditions.length === 0) {
+    return <></>;
   }
 
   if (data.length === 0) {
@@ -137,9 +151,7 @@ export const ViewPie = forwardRef<ChartExportHandle, Props>(({ view }, ref) => {
             content={
               <CustomTooltip
                 unit={
-                  groupAggregation?.value === "count"
-                    ? "件"
-                    : chartProps.yAxisColumn.unit
+                  aggregation === "count" ? "件" : chartProps.yAxisColumn.unit
                 }
               />
             }

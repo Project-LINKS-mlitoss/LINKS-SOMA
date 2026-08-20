@@ -308,3 +308,91 @@ class TestIF004Main:
                 found = True
                 break
         assert found, "出力CSVファイルが見つからない"
+
+
+# ============================================================
+# ビュー経由の出力 統合テスト
+# ============================================================
+
+
+def _insert_building_data_with_extras(db_path, data_set_result_id=1):
+    """空き家調査結果と建物関連データを持つ推定結果を挿入"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO data_set_results (id, title, job_id) VALUES (?, ?, ?)",
+        (data_set_result_id, "テスト結果", 1),
+    )
+    cursor.execute("""
+        INSERT INTO data_set_detail_buildings
+        (data_set_result_id, reference_date, building_id, predicted_label,
+         predicted_probability, lat_geocoding, lon_geocoding, normalized_address,
+         bldg_geometry, is_vacant, vacant_type, optional_data_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        data_set_result_id, "2024-01-01", "BLD001", 1, 0.85,
+        35.68, 139.76, "東京都千代田区1-1", "POINT (139.76 35.68)",
+        1, "空き家", '[{"name": "課税標準額", "value": "5000000"}]',
+    ))
+    conn.commit()
+    conn.close()
+
+
+def _insert_result_view(db_path, view_id=1, data_set_result_id=1, columns=""):
+    """表示項目を指定した建物単位のビューを挿入"""
+    conn = sqlite3.connect(db_path)
+    parameters = json.dumps(
+        [{"key": "columns", "type": "column", "value": columns}],
+        ensure_ascii=False,
+    )
+    conn.execute(
+        "INSERT INTO result_views "
+        "(id, sheet_id, data_set_result_id, title, unit, style, parameters) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (view_id, 1, data_set_result_id, "テストビュー", "building", "table", parameters),
+    )
+    conn.commit()
+    conn.close()
+
+
+class TestE033ViewExport:
+    """ビュー(view_id)経由の出力で表示項目に無い列が欠けないか
+
+    ビューに columns パラメータがあると SELECT が表示項目だけに絞られる。
+    建物関連データはビューの表示項目に現れないため、明示的に足さないと出力から消える。
+    """
+
+    @pytest.fixture
+    def env(self, tmp_path, test_db):
+        _insert_building_data_with_extras(test_db)
+        _insert_result_view(
+            test_db, columns="normalized_address,is_vacant,predicted_probability"
+        )
+        output_dir = str(tmp_path / "output")
+        os.makedirs(output_dir, exist_ok=True)
+        return {"db_path": test_db, "output_dir": output_dir}
+
+    def _run(self, env):
+        output_path = os.path.join(env["output_dir"], "view_output.csv")
+        params = {
+            "data_set_results_id": None,
+            "target_unit": "building",
+            "output_format": "csv",
+            "view_id": 1,
+            "target_crs": "EPSG:4326 (WGS84)",
+            "reference_date": None,
+            "output_path": output_path,
+        }
+        E033(params, None, env["db_path"])
+        return output_path
+
+    def test_selected_column_is_exported(self, env):
+        """表示項目に選んだ空き家調査結果の列が日本語名で出る"""
+        df = pd.read_csv(self._run(env))
+        assert "空き家" in df.columns
+
+    def test_optional_data_source_is_expanded(self, env):
+        """表示項目に無い建物関連データも展開されて出る"""
+        df = pd.read_csv(self._run(env))
+        assert "[追加] 課税標準額" in df.columns
+        assert str(df["[追加] 課税標準額"].iloc[0]) == "5000000"

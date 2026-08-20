@@ -20,22 +20,26 @@ import { useDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { DialogImportNormalizedDataset } from "../../components/dialog-import-normalized-dataset";
 import { type SelectNormalizedDataSet } from "../../../../db/schema";
 import { DialogExplanatoryVariables } from "../../components/dialog-explanatory-variables";
-import { DialogModelAdvanced } from "../../components/dialog-model-advanced";
 import {
   type schema,
   useFormModelCreate,
 } from "../../hooks/use-form-model-create";
-import { DEFAULT_EXPLANATORY_COLUMNS } from "../../constants";
+import {
+  DEFAULT_EXPLANATORY_COLUMNS,
+  HIDDEN_EXPLANATORY_COLUMNS,
+} from "../../constants";
 import { DialogModelMessage } from "../../components/dialog-model-message";
 import { useFetchDatasetColumns } from "../../../dataset/hooks/use-fetch-dataset-columns";
 import { toOdsDisplayName } from "../../../../shared/types/optional-data-source";
 import { useFetchJob } from "../../../job/hooks/use-fetch-job";
 import { useFetchDatasetWithFilePath } from "../../../dataset/hooks/use-fetch-dataset-with-file-path";
 import { lang } from "../../../../shared/config/lang";
+import { ProcessIntro } from "../../../../shared/components/process-intro";
+import { RequiredField } from "../../../../shared/components/required-field";
 import { SIDEBAR_WIDTH } from "../../../../shared/config/layout-constants";
-import { THEME_COLORS } from "../../../../shared/config/theme-colors";
 import { ROUTES } from "../../../../shared/config/routes";
-import { FIELDS } from "../../components/dialog-model-advanced/const";
+import { useGuideStageResume } from "../../../../shared/tutorial/use-guide-stage-resume";
+import { tutorialStore } from "../../../../shared/tutorial/store";
 
 const useStyles = makeStyles({
   root: {
@@ -105,7 +109,6 @@ export const ModelCreate = (): JSX.Element => {
     handleSubmit,
     setValue,
     formState: { errors },
-    watch,
   } = form;
 
   // 説明変数: ユーザー選択 > 既存ジョブの保存値 > デフォルトとCSV実カラムの交差
@@ -125,22 +128,50 @@ export const ModelCreate = (): JSX.Element => {
     );
   })();
 
+  // ガイド進行中のみ: 選択データセット/説明変数を中断→復元できるようにする (ADR-0024)。
+  useGuideStageResume({
+    stage: "model",
+    apply: async (snapshot) => {
+      if (snapshot.stage !== "model") return;
+      if (snapshot.datasetId != null) {
+        const ds = (await window.ipcRenderer.invoke("selectNormalizedDataSet", {
+          id: snapshot.datasetId,
+        })) as SelectNormalizedDataSet | null;
+        if (ds) setUserSelectedDataset(ds);
+      }
+      if (snapshot.variables.length > 0)
+        setUserSelectedVariables(snapshot.variables);
+    },
+    takeSnapshot: () => ({
+      stage: "model",
+      datasetId: normalizedDataSet?.id ?? null,
+      variables: explanatoryVariables,
+    }),
+    deps: [normalizedDataSet?.id, explanatoryVariables],
+  });
+
   const modelMessageDialogState = useDialogState();
 
   const onSubmit = async (e: React.FormEvent): Promise<void> => {
     // 導出値をフォームに同期してからバリデーション実行
     setValue("input_path", normalizedDataSet?.file_path ?? "");
     setValue("settings.explanatory_variables", explanatoryVariables);
-    if (modelCreateParameters?.settings.advanced) {
-      setValue("settings.advanced", modelCreateParameters.settings.advanced);
-    }
     await handleSubmit(async (data: FormType) => {
-      await window.ipcRenderer.invoke("buildModel", {
+      const jobId = await window.ipcRenderer.invoke("buildModel", {
         data: {
           parameterType: "ml",
           ...data,
         },
       });
+      // ガイドのモデル工程中なら、作成したジョブを参照記録し進行状態バッジに使う（ADR-0024）。
+      const guide = tutorialStore.getState();
+      if (
+        guide.phase === "running" &&
+        guide.stage === "model" &&
+        jobId != null
+      ) {
+        tutorialStore.setModelJobId(jobId);
+      }
       modelMessageDialogState.setIsOpen(true);
     })(e);
   };
@@ -148,9 +179,6 @@ export const ModelCreate = (): JSX.Element => {
   const importNormalizedDatasetDialogState = useDialogState();
 
   const explanatoryVariablesDialogState = useDialogState();
-
-  const modelAdvancedDialogState = useDialogState();
-  const modelAdvanced = watch("settings.advanced");
 
   return (
     <form className={styles.root} onSubmit={onSubmit}>
@@ -171,6 +199,8 @@ export const ModelCreate = (): JSX.Element => {
       />
       <h2 className={styles.heading}>モデル構築</h2>
 
+      <ProcessIntro description={lang.components.processIntro.model} />
+
       <div className={styles.contents}>
         <Card>
           <Subtitle2>
@@ -179,20 +209,19 @@ export const ModelCreate = (): JSX.Element => {
               tooltipContent={lang.pages["model/create"].subtitle1.description}
             />
           </Subtitle2>
-          <div>{normalizedDataSet?.file_name}</div>
-          <div>
-            <Button
-              appearance="primary"
-              onClick={() => importNormalizedDatasetDialogState.setIsOpen(true)}
-            >
-              インポート
-            </Button>
-          </div>
-          {errors.input_path?.message && (
-            <Caption1 style={{ color: THEME_COLORS.error }}>
-              {errors.input_path.message}
-            </Caption1>
-          )}
+          <RequiredField error={errors.input_path}>
+            <div>{normalizedDataSet?.file_name}</div>
+            <div>
+              <Button
+                appearance="primary"
+                onClick={() =>
+                  importNormalizedDatasetDialogState.setIsOpen(true)
+                }
+              >
+                インポート
+              </Button>
+            </div>
+          </RequiredField>
         </Card>
         <DialogImportNormalizedDataset
           dialogState={importNormalizedDatasetDialogState}
@@ -210,88 +239,44 @@ export const ModelCreate = (): JSX.Element => {
             />
           </Subtitle2>
 
-          {normalizedDataSet?.file_name && explanatoryVariables.length > 0 && (
-            <TagContainer>
-              {explanatoryVariables.map((column, index) => (
-                <Tag key={index} size="small">
-                  <Caption1>{toOdsDisplayName(column)}</Caption1>
-                </Tag>
-              ))}
-            </TagContainer>
-          )}
-          <div className={styles.buttonWithCount}>
-            <Button
-              appearance="primary"
-              onClick={() => explanatoryVariablesDialogState.setIsOpen(true)}
-            >
-              {explanatoryVariables.length > 0 ? "カラムを変更" : "インポート"}
-            </Button>
-            {explanatoryVariables.length > 0 && (
-              <Caption1 className={styles.selectedCount}>
-                {explanatoryVariables.length}カラム選択中
-              </Caption1>
-            )}
-          </div>
-          {errors.settings?.explanatory_variables?.message && (
-            <Caption1 style={{ color: THEME_COLORS.error }}>
-              {errors.settings.explanatory_variables.message}
-            </Caption1>
-          )}
+          <RequiredField error={errors.settings?.explanatory_variables}>
+            {normalizedDataSet?.file_name &&
+              explanatoryVariables.length > 0 && (
+                <TagContainer>
+                  {explanatoryVariables.map((column, index) => (
+                    <Tag key={index} size="small">
+                      <Caption1>{toOdsDisplayName(column)}</Caption1>
+                    </Tag>
+                  ))}
+                </TagContainer>
+              )}
+            <div className={styles.buttonWithCount}>
+              <Button
+                appearance="primary"
+                onClick={() => explanatoryVariablesDialogState.setIsOpen(true)}
+              >
+                {explanatoryVariables.length > 0
+                  ? "カラムを変更"
+                  : "インポート"}
+              </Button>
+              {explanatoryVariables.length > 0 && (
+                <Caption1 className={styles.selectedCount}>
+                  {explanatoryVariables.length}カラム選択中
+                </Caption1>
+              )}
+            </div>
+          </RequiredField>
         </Card>
         {!isJobLoading ? (
           <DialogExplanatoryVariables
-            columnOptions={datasetColumns || []}
+            columnOptions={(datasetColumns || []).filter(
+              (col) => !HIDDEN_EXPLANATORY_COLUMNS.includes(col),
+            )}
             dialogState={explanatoryVariablesDialogState}
             initialValues={explanatoryVariables}
             onSelected={(data) => {
               setUserSelectedVariables(data);
             }}
-          />
-        ) : null}
-        <Card>
-          <Subtitle2>
-            <TextWithTooltip
-              textNode={lang.pages["model/create"].subtitle3.label}
-              tooltipContent={lang.pages["model/create"].subtitle3.description}
-            />
-          </Subtitle2>
-          {modelAdvanced && (
-            <TagContainer>
-              {Object.entries(modelAdvanced)
-                .filter(([, value]) => value)
-                .map(([key, value]) => {
-                  const field = FIELDS.find((field) => field.key === key);
-                  return (
-                    <Tag key={key} size="small">
-                      <Caption1
-                        key={key}
-                      >{`${field?.label || key}: ${value || "未設定"}`}</Caption1>
-                    </Tag>
-                  );
-                })}
-            </TagContainer>
-          )}
-          <div>
-            <Button
-              appearance="transparent"
-              onClick={() => modelAdvancedDialogState.setIsOpen(true)}
-            >
-              高度な設定を変更
-            </Button>
-          </div>
-          {errors.settings?.advanced?.message && (
-            <Caption1 style={{ color: THEME_COLORS.error }}>
-              {errors.settings.advanced.message}
-            </Caption1>
-          )}
-        </Card>
-        {!isJobLoading ? (
-          <DialogModelAdvanced
-            dialogState={modelAdvancedDialogState}
-            initialValues={
-              modelCreateParameters?.settings.advanced ?? modelAdvanced
-            }
-            onSelected={(data) => setValue("settings.advanced", data)}
           />
         ) : null}
       </div>

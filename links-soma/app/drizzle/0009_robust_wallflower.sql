@@ -1,0 +1,1 @@
+ALTER TABLE `normalized_data_sets` ADD `purpose` text;

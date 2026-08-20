@@ -137,6 +137,60 @@ test.describe("BI操作", () => {
       await page.getByRole("button", { name: "close" }).click();
       await page.waitForSelector('[role="dialog"]', { state: "hidden" });
     });
+
+    test("フィルター条件を操作してダウンロードを開始できること", async () => {
+      test.skip(!hasData, "名寄せ結果データが存在しません");
+
+      // ダウンロードダイアログを開く
+      const actionMenu = page
+        .getByRole("button", { name: "アクションメニュー" })
+        .first();
+      await actionMenu.click();
+      await page.waitForTimeout(300);
+      await page.getByText("GISデータをダウンロード").click();
+      await page.waitForSelector('[role="dialog"]');
+
+      // ダイアログ名（aria-labelledby＝タイトル）でスコープする。
+      // hasText だとフィルター節の未選択ラベル「地域を選択してください」と衝突する
+      const downloadDialog = page.getByRole("dialog", {
+        name: "形式を選んでダウンロード",
+      });
+      await expect(downloadDialog).toBeVisible();
+
+      // 地域フィルターを操作（地域選択ダイアログで先頭の地域をトグル）。
+      // 表・地図ビューでは出力カラム節にも「変更」ボタンがあるため、
+      // フィルター節（group）にスコープを絞る
+      await downloadDialog
+        .getByRole("group", { name: "フィルター", exact: true })
+        .getByRole("button", { name: "変更" })
+        .click();
+      const areaDialog = page.getByRole("dialog", { name: "地域を選択" });
+      await expect(areaDialog).toBeVisible();
+
+      // 先頭の地域をトグルし、親再レンダーで巻き戻らないこと（state 同期不具合の回帰確認）。
+      // 初期状態（全選択/未選択）に依存しないようトグル後の反対状態を検証する
+      const firstArea = areaDialog.getByRole("checkbox").first();
+      const before = await firstArea.isChecked();
+      await firstArea.click();
+      await page.waitForTimeout(500);
+      await expect(firstArea).toBeChecked({ checked: !before });
+
+      await areaDialog.getByRole("button", { name: "保存" }).click();
+      await expect(areaDialog).toBeHidden();
+
+      // ダウンロード開始 → 準備開始メッセージが表示されること
+      await downloadDialog
+        .getByRole("button", { name: "ダウンロード準備を開始する" })
+        .click();
+      await expect(
+        page.getByText("ダウンロード準備を開始しました"),
+      ).toBeVisible({ timeout: 15000 });
+
+      // ダウンロード開始後もダイアログは開いたまま。閉じずに終わると後続テストが
+      // モーダルの裏のビューを操作できないため、ここで閉じる
+      await page.keyboard.press("Escape");
+      await expect(downloadDialog).toBeHidden();
+    });
   });
 
   test.describe("ビュー削除", () => {

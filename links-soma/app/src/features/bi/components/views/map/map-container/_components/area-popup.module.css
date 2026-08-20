@@ -92,33 +92,6 @@
   background-color: #df7324;
 }
 
-.low {
-  color: #1b8c63;
-  background-color: #1b8c631f;
-}
-
-.low > span {
-  background-color: #1b8c63;
-}
-
-.medium {
-  color: #ffa929;
-  background-color: #ffa9291f;
-}
-
-.medium > span {
-  background-color: #ffa929;
-}
-
-.high {
-  color: #c4314b;
-  background-color: #c4314b1f;
-}
-
-.high > span {
-  background-color: #c4314b;
-}
-
 /* 全項目表示モード用のスタイル */
 .allColumnsContainer {
   padding: 12px 20px 20px;

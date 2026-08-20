@@ -38,6 +38,7 @@ sys.path.append(
 )
 
 from src.E002_Classification.E021 import train_and_evaluate as E021  # noqa: E402
+from src.preprocessing.import_validation import FeatureTypeMismatchError  # noqa: E402
 
 sys.stdin = open(sys.stdin.fileno(), mode="r", encoding="utf-8")
 sys.stdout = open(sys.stdout.fileno(), mode="w", encoding="utf-8")
@@ -73,7 +74,8 @@ def main():
         )
 
         # Setup logging
-        logs_dir = concatenate(output_path_base, "logs")
+        # ジョブ単位ディレクトリに分離（ジョブ混在・証跡DLのため）
+        logs_dir = concatenate(output_path_base, f"logs/job_{job_id}")
         os.makedirs(logs_dir, exist_ok=True)
         logger = get_rotating_logger(logs_dir, logger_name="IF002")
         logger.info(f"IF002 START: {if002_start.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -126,6 +128,24 @@ def main():
         logger.info(f"IF002 END: {if002_end.strftime('%Y-%m-%d %H:%M:%S')} "
                      f"(Duration: {if002_duration:.2f}s) ({if002_duration/60:.2f}m)")
 
+    except FeatureTypeMismatchError as e:
+        # 説明変数の型不一致(E-201): 不透明な ValueError でなく、どの列が非数値か＋責任分界を記録
+        if job_id:
+            error_msg = ERROR_FEATURE_TYPE_IF002["message"].replace(
+                "{param_st1}", "、".join(e.columns)
+            )
+            create_or_update_job_task(
+                job_id,
+                progress_percent="",
+                preprocess_type=None,
+                error_code=ERROR_FEATURE_TYPE_IF002["code"],
+                error_msg=error_msg,
+                result=json.dumps({}),
+                is_finish=True,
+            )
+            create_or_update_job(job_id, "error")
+        if logger:
+            logger.error("IF002 feature type mismatch: %s", e)
     except Exception:
         if002_end = datetime.now()
         if job_id:

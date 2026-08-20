@@ -47,7 +47,9 @@ export type JoinCheckTarget =
   | "resident_registry"
   | "building_registry"
   | "geocoding"
-  | "building_type_determination";
+  | "building_type_determination"
+  | "vacant_house"
+  | "optional_data_source";
 
 /** 住所の表記ゆれチェック用データセット設定 */
 type JoinCheckDatasetConfig = {
@@ -77,6 +79,10 @@ export type JoinCheckParameters = {
     building_type_determination?: JoinCheckDatasetConfig;
     /** ジオコーディング済みデータ */
     geocoding?: JoinCheckDatasetConfig;
+    /** 空き家調査結果 */
+    vacant_house?: JoinCheckDatasetConfig;
+    /** 建物関連データ */
+    optional_data_source?: JoinCheckDatasetConfig;
   };
 };
 

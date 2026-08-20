@@ -123,7 +123,7 @@ test.describe("建物ポリゴンなし名寄せ・推定処理", () => {
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

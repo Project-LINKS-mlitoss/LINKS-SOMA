@@ -45,6 +45,8 @@ type Props = {
   | {
       type: "select";
       onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+      /** 非活性のときも選択内容は表示する（固定関係を示すため） */
+      disabled?: boolean;
     }
   | {
       type: "dropdown";
@@ -83,6 +85,7 @@ export const DynamicParameterInput = forwardRef<
         {props.type === "select" && (
           <Select
             ref={ref as ForwardedRef<HTMLSelectElement>}
+            disabled={props.disabled}
             name={props.name}
             onChange={props.onChange}
             value={props.value}

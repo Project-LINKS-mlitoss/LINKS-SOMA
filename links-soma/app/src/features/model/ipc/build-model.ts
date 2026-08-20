@@ -10,11 +10,16 @@ type Params = {
   data: ModelCreateParameters;
 };
 
-/** IF002:モデル構築機能の呼び出し */
+/**
+ * IF002:モデル構築機能の呼び出し
+ *
+ * 成功時は作成したジョブ id を返す。ガイド進行中はこの id を進行状態バッジに使う（ADR-0024）。
+ * 失敗時は null（呼び出し側はジョブ未作成として扱う）。
+ */
 export const buildModel = (async (
   _: unknown,
   params: Params,
-): Promise<boolean> => {
+): Promise<number | null> => {
   const { data } = params;
 
   try {
@@ -34,7 +39,7 @@ export const buildModel = (async (
         "Job process start failed",
         new Error("buildModel: ML job failed to start"),
       );
-      return false;
+      return null;
     }
 
     // childProcessに入れてバックグラウンド実行
@@ -56,9 +61,9 @@ export const buildModel = (async (
 
     setupMLProcessHandlers(cp, jobProcess.data.jobId);
 
-    return true;
+    return jobProcess.data.jobId;
   } catch (error) {
     mainProcessLogger.error("buildModel failed", error as Error);
-    return false;
+    return null;
   }
 }) satisfies IpcMainListener;

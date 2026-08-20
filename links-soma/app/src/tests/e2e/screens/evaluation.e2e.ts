@@ -49,4 +49,17 @@ test.describe("空き家推定", () => {
       page.getByRole("button", { name: "選択" }).first(),
     ).toBeVisible();
   });
+
+  test("必須未選択で推定開始するとインライン検証でブロックされること（PV-17）", async () => {
+    // 直前テストで /evaluation/create に居る。何も選択せず推定開始を押す。
+    await page.getByRole("button", { name: "推定開始" }).click();
+
+    // 必須選択の検証メッセージが表示される（lang: evaluation/create.validation）
+    await expect(
+      page.getByText("利用するモデルを選択してください"),
+    ).toBeVisible({ timeout: 5000 });
+
+    // 送信されず作成画面に留まる
+    expect(page.url()).toContain("/evaluation/create");
+  });
 });

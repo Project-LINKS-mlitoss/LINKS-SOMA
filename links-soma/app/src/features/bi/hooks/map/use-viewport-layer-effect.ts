@@ -5,6 +5,12 @@ import { type MapWithTableView } from "../../types/models/view";
 import { addLayerEffect } from "../../components/views/map/map-container/_components/add-layer-effect";
 import { ViewportLoader } from "../../util/map/viewport-loader";
 import {
+  type MapColorColumn,
+  resolveColorProperty,
+} from "../../util/map/color-column";
+import { updateLayerColor } from "../../util/map/update-layer-color";
+import { getGradientStops } from "../../util/map/layer-styles";
+import {
   type BufferedViewport,
   createBufferedViewport,
   getViewportBounds,
@@ -160,6 +166,10 @@ type Props = {
   selectedDate: string | undefined;
   view: MapWithTableView;
   setSelectedFeature: (feature: FeatureData | null) => void;
+  /** スライダー目盛り上限。色グラデーションの境界算出に渡す */
+  domainMax: number;
+  /** 色分けに使うカラム（確率／年度間変化率） */
+  colorColumn: MapColorColumn;
 };
 
 export type ViewportLayerEffectReturn = {
@@ -185,6 +195,8 @@ export const useViewportLayerEffect = ({
   selectedDate,
   view,
   setSelectedFeature,
+  domainMax,
+  colorColumn,
 }: Props): ViewportLayerEffectReturn => {
   const [layerIds, setLayerIds] = useState<string[] | null>(null);
   const [progress, setProgress] = useState<number>(0);
@@ -202,6 +214,14 @@ export const useViewportLayerEffect = ({
     () => extractThresholdFromParameters(view.parameters),
     [view.parameters],
   );
+
+  /**
+   * 色分け指標の最新値。レイヤー生成時に読むだけで、変更を再取得の契機にしない。
+   * 依存に入れると updateLayersForViewport の identity が変わり、色を変えるたびに
+   * ビューポート全件の再取得が走るため（実際に変わるのは paint の色式のみ）。
+   */
+  const colorColumnRef = useRef(colorColumn);
+  colorColumnRef.current = colorColumn;
 
   /** レイヤークリーンアップ関数の管理 */
   const layerCleanupFunctions = useRef<Map<string, () => void>>(
@@ -322,6 +342,8 @@ export const useViewportLayerEffect = ({
               unit: view.unit,
               getFeatureById,
               threshold,
+              domainMax,
+              colorColumn: colorColumnRef.current,
             });
 
             cleanupFunctionsRef.set(layerId, cleanupFunction);
@@ -346,6 +368,7 @@ export const useViewportLayerEffect = ({
       selectedDate,
       setSelectedFeature,
       threshold,
+      domainMax,
       view.dataSetResultId,
       view.parameters,
       view.unit,
@@ -357,6 +380,33 @@ export const useViewportLayerEffect = ({
   const updateLayersForViewportStable = useCallback(async (): Promise<void> => {
     await updateLayersForViewport();
   }, [updateLayersForViewport]);
+
+  /**
+   * 色分け指標が変わったら、描画済みレイヤーの色式だけを差し替える。
+   * データは変わらないため再取得しない。
+   */
+  useEffect(() => {
+    if (!mapInstance || !layerIds) return;
+
+    const { propertyName, metric } = resolveColorProperty(
+      colorColumn,
+      view.unit,
+      threshold,
+    );
+    const probabilityStops = getGradientStops(domainMax);
+
+    layerIds.forEach((layerId) => {
+      try {
+        updateLayerColor(mapInstance, layerId, {
+          colorPropertyName: propertyName,
+          colorMetric: metric,
+          probabilityStops,
+        });
+      } catch (error) {
+        rendererLogger.warn(`Failed to update color for ${layerId}`, error);
+      }
+    });
+  }, [colorColumn, layerIds, mapInstance, view.unit, threshold, domainMax]);
 
   /** レイヤーを即座にクリアする関数 */
   const clearLayersImmediately = useCallback((): void => {

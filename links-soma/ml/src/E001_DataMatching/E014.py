@@ -693,343 +693,6 @@ def translate_column_name(
     save_csv(df, output_path)
 
 
-def embedding_address(
-    main_csv: io.BytesIO | str,
-    input_source: list[str],
-    output_path: str,
-    job_id: str = None,
-    db_path: str = None,
-    logs_dir=None,
-    task_id_summarization: int = None,
-    result_summarization: str = None,
-    output_directory: str = None,
-) -> Tuple[str, str]:
-    """
-    住所名寄せ処理を行う
-
-    Parameters
-    ----------
-    main_csv : io.BytesIO
-        メインのCSVファイル
-    sub_csv : io.BytesIO
-        サブのCSVファイル
-
-    Returns
-    -------
-    Tuple[str, str]
-        結果ファイルのパスと結果の概要
-    """
-    task_id = None
-    logger = None
-    result_summarization_updated = None
-    address_column = "normalized_address"
-    try:
-        if logs_dir:
-            logger = get_rotating_logger(logs_dir, logger_name="E014")
-        else:
-            logs_dir = os.path.join(output_path, "logs")
-            logger = get_rotating_logger(logs_dir, logger_name="E014")
-
-        progress_percent_job = 50
-        progress_percent = 25 / len(input_source)
-        if db_path:
-            connect_sqllite(db_path)
-            progress_percent = progress_percent / 4
-        if job_id:
-            create_or_update_job(job_id, "51")
-
-        if output_path is None:
-            output_path = OUTPUT_PATH
-
-        output_dir = os.path.dirname(output_path)
-
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        main_df = read_data(main_csv)
-        main_csv_name = os.path.splitext(os.path.basename(main_csv))[0]
-        main_flag_name = f"{main_csv_name}_flag"
-
-        # Convert main_df to Polars before loop
-        object_cols_main = main_df.select_dtypes(include=['object']).columns
-        if len(object_cols_main) > 0:
-            main_df[object_cols_main] = main_df[object_cols_main].fillna('').astype(str)
-        main_pl = pl.from_pandas(main_df)
-        del main_df
-        gc.collect()
-        
-        for item in input_source:
-            sub_csv = f"{output_directory}/{item}_cleaned.csv"
-            if item in ["juki", "touki"]:
-                sub_csv = f"{output_directory}/{item}_residence.csv"
-
-            sub_df = read_data(sub_csv)
-
-            # アップロードされた元のファイル名を使用して拡張子を除去
-            sub_csv_name = os.path.splitext(os.path.basename(sub_csv))[0]
-
-            # アンダーバーと数字のパターンを削除
-            sub_csv_name = re.sub(r"_\d+$", "", sub_csv_name)
-            sub_df.columns = [
-                f"{col}_{sub_csv_name}" if col != address_column else col
-                for col in sub_df.columns
-            ]
-
-            # 名寄せが判断できるflagを設定
-            sub_flag_name = f"{sub_csv_name}_flag"
-
-            # 名寄せ対象になる行を元情報として残す
-            sub_df[f"normalized_address_{sub_csv_name}"] = sub_df[address_column]
-            if job_id:
-                progress_percent_job = progress_percent_job + progress_percent
-                create_or_update_job(job_id, progress_percent_job)
-                task_id = create_or_update_job_task(
-                    job_id,
-                    progress_percent="20",
-                    preprocess_type="e014",
-                    error_code=None,
-                    error_msg=None,
-                    result=None,
-                )
-
-            # 完全一致による結合
-            sub_df = sub_df.drop_duplicates(address_column, keep="first")
-            if sub_df.empty:
-                raise Exception(
-                    f"No data found in the {item} file"
-                )  # item is juki or touki or geocoding
-            if main_pl.is_empty():
-                raise Exception(
-                    "No data found in the suido_residence file"
-                )
-
-            sub_data_rows = len(sub_df)
-
-            # Clean sub_df before converting to Polars
-            object_cols_sub = sub_df.select_dtypes(include=['object']).columns
-            if len(object_cols_sub) > 0:
-                sub_df[object_cols_sub] = (
-                    sub_df[object_cols_sub].fillna('').astype(str)
-                )
-
-            # Convert sub_df to Polars
-            sub_pl = pl.from_pandas(sub_df)
-            del sub_df
-
-            merged_pl = main_pl.join(sub_pl, on=address_column, how="left")
-            
-            # Create indicator column (1 if matched, 0 if not)
-            # Check if any column from sub_df (except join key) has non-null value
-            sub_cols = [col for col in sub_pl.columns if col != address_column]
-
-            del sub_pl
-            gc.collect()
-
-            if job_id:
-                create_or_update_job(job_id, progress_percent_job)
-                create_or_update_job_task(
-                    job_id,
-                    progress_percent="50",
-                    preprocess_type="e014",
-                    error_code=None,
-                    error_msg=None,
-                    result=None,
-                    id=task_id,
-                )
-            
-            if sub_cols:
-                merged_pl = merged_pl.with_columns(
-                    pl.when(pl.col(sub_cols[0]).is_not_null())
-                    .then(pl.lit(1))
-                    .otherwise(pl.lit(0))
-                    .alias(sub_flag_name)
-                )
-            else:
-                merged_pl = merged_pl.with_columns(
-                    pl.lit(0).alias(sub_flag_name)
-                )
-            
-            if main_csv_name == "suido_residence":
-                merged_pl = merged_pl.with_columns(
-                    pl.lit(1).alias(main_flag_name)
-                )
-
-            if task_id_summarization and sub_csv_name == "geocoding_cleaned":
-                # Check if result_summarization is string, then load it
-                if isinstance(result_summarization, str):
-                    result_summarization = json.loads(result_summarization)
-                elif not isinstance(result_summarization, dict):
-                    result_summarization = {}
-
-                # Calculate record combinations total (all records)
-                record_combinations_total = len(merged_pl)
-                
-                # Calculate record combinations statistics
-                # Get flag columns
-                flag_cols = {
-                    'suido_residence_flag': 'has_water_supply',
-                    'juki_residence_flag': 'has_juki_registry',
-                    'touki_residence_flag': 'has_touki_registry'
-                }
-
-                # Create flags dict for checking existence in dataframe
-                existing_flags = {}
-                for flag_col in flag_cols.keys():
-                    if flag_col in merged_pl.columns:
-                        existing_flags[flag_col] = flag_cols[flag_col]
-
-                # Calculate estimation target total count
-                # (records with at least one flag = 1)
-                if existing_flags:
-                    condition = None
-                    for flag_col in existing_flags.keys():
-                        if condition is None:
-                            condition = pl.col(flag_col) == 1
-                        else:
-                            condition = condition | (pl.col(flag_col) == 1)
-                    estimation_target_total_count = merged_pl.filter(
-                        condition
-                    ).height
-                else:
-                    estimation_target_total_count = 0
-
-                # Group by all flag columns and count
-                if existing_flags:
-                    group_cols = list(existing_flags.keys())
-                    combinations_df = merged_pl.group_by(group_cols).agg(
-                        pl.count().alias('count')
-                    ).sort(group_cols)
-
-                    # Convert to pandas for easier iteration
-                    combinations_pd = combinations_df.to_pandas()
-
-                    record_combinations = []
-                    for _, row in combinations_pd.iterrows():
-                        combination = {}
-                        for flag_col, field_name in existing_flags.items():
-                            combination[field_name] = bool(row[flag_col] == 1)
-                        combination['count'] = int(row['count'])
-                        if record_combinations_total > 0:
-                            percentage = (
-                                row['count'] / record_combinations_total * 100
-                            )
-                        else:
-                            percentage = 0.0
-                        combination['percentage'] = round(percentage, 2)
-                        record_combinations.append(combination)
-                else:
-                    record_combinations = []
-
-                # Update result_summarization with new fields
-                result_summarization['estimation_target_total_count'] = (
-                    estimation_target_total_count
-                )
-                result_summarization['record_combinations'] = (
-                    record_combinations
-                )
-                result_summarization['record_combinations_total'] = (
-                    record_combinations_total
-                )
-                
-                _, result_summarization_updated = create_or_update_summarization_job_task(
-                    job_id,
-                    "30",
-                    "preprocess_summary",
-                    json.dumps(result_summarization),
-                    id=task_id_summarization,
-                    is_finish=False,
-                )
-
-            if job_id:
-                create_or_update_job_task(
-                    job_id,
-                    progress_percent="70",
-                    preprocess_type="e014",
-                    error_code=None,
-                    error_msg=None,
-                    result=None,
-                    id=task_id,
-                )
-
-            # Count unique matched values
-            has_match = (merged_pl[sub_flag_name] == 1).any()
-            if has_match:
-                matched_rows = merged_pl.filter(pl.col(sub_flag_name) == 1)
-                total_match = matched_rows[address_column].n_unique()
-            else:
-                total_match = 0
-            sub_participation_rate = (
-                total_match / sub_data_rows * 100 if sub_data_rows > 0 else 0
-            )
-
-            file_match = None
-            if item == "juki":
-                file_match = "「水道閉開栓状況」に「住民基本台帳」を住所で結合（A） "
-            elif item == "touki":
-                file_match = "Aに「登記情報」を住所で結合（B） "
-            elif item == "geocoding":
-                if len(input_source) > 2:
-                    file_match = "Bに「ジオコーディング済データ」を住所で結合（C） "
-                else:
-                    file_match = "Aに「ジオコーディング済データ」を住所で結合（B） "
-            res = {
-                "joining_rate": sub_participation_rate,  # sub側の参加率
-                "input_source": file_match,
-                "success_rate": f"{total_match}件/{sub_data_rows}件中",
-            }
-            if job_id:
-                create_or_update_job_task(
-                    job_id,
-                    progress_percent="100",
-                    preprocess_type="e014",
-                    error_code=None,
-                    error_msg=None,
-                    result=json.dumps(res, ensure_ascii=False),
-                    id=task_id,
-                    is_finish=True,
-                )
-            
-            # Drop redundant normalized_address_*
-            if item == "optional_data_source":
-                drop_col = "normalized_address_optional_data_source_cleaned"
-            elif item == "vacant_house":
-                drop_col = "normalized_address_vacant_house_cleaned"
-            else:
-                drop_col = None
-            if drop_col and drop_col in merged_pl.columns:
-                merged_pl = merged_pl.drop(drop_col)
-
-            # Keep merged_pl as main_pl for next iteration
-            main_pl = merged_pl
-            gc.collect()
-
-        # Convert to Pandas
-        main_df = main_pl.to_pandas()
-        del main_pl
-        gc.collect()
-
-        # 結果をCSVファイルとして保存
-        save_csv(main_df, output_path)
-        return result_summarization_updated
-    except Exception as e:
-        if logger:
-            logger.error("E014 failed:\n%s", traceback.format_exc())
-        if ERROR_CODE is None:
-            set_error(ERROR_00013)
-        if task_id:
-            create_or_update_job_task(
-                job_id,
-                progress_percent="",
-                preprocess_type="e014",
-                error_code=ERROR_CODE,
-                error_msg=ERROR_MSG,
-                result=json.dumps({}),
-                id=task_id,
-                is_finish=True,
-            )
-        raise Exception("テキストマッチング処理中にエラーが発生しました。")
-
-
 def convert_8digit_float_cols(df: pd.DataFrame) -> pd.DataFrame:
     """
     20170818.0 のような float 表現をすべて int (20170818) に正規化する。
@@ -1109,134 +772,85 @@ def parse_base_date(base_date_str: str) -> pd.Timestamp:
     return dt
 
 
-def parse_yyyymmdd_series(series: pd.Series) -> pd.Series:
-    # Convert to object dtype first to avoid issues with string dtype
-    s = series.fillna('').astype(str).astype(object).str.strip()
-    mask_8 = s.str.match(r"^\d{8}$")
-    result = pd.Series(pd.NaT, index=s.index)
-    if mask_8.any():
-        result.loc[mask_8] = pd.to_datetime(
-            s.loc[mask_8], format="%Y%m%d", errors="coerce"
-        )
-    return result
+def _parse_events_json(value) -> list:
+    """events_json_touki_residence の1セルを events リストに復元する。
+
+    CSV 経由の二重クォート（"" → "）を補正する。壊れていれば空リスト。
+    """
+    try:
+        if pd.isna(value):
+            return []
+    except (TypeError, ValueError):
+        pass
+    if not value or (isinstance(value, str) and not value.strip()):
+        return []
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, str):
+        return []
+    try:
+        events = json.loads(value.replace('""', '"'))
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return events if isinstance(events, list) else []
 
 
-def pick_reason_and_date_near_base(
+def add_registration_duration_features(
     df: pd.DataFrame, base_date: pd.Timestamp
 ) -> pd.DataFrame:
-    # JSON形式のevents_jsonカラムからデータを取得
-    if "events_json_touki_residence" not in df.columns:
-        df["date_registration_event"] = ""
-        df["registration_reason"] = ""
-        df["days_since_registration_event"] = ""
-        return df
+    """登記イベントから案Eの経過年数3指標（満年数）を付与する。
 
-    target_pattern = re.compile("(相続|遺贈|贈与|売買|公売|競売)")
+    - building_age_years       築年数 = 基準日 − 最古登記日付
+    - years_since_inheritance  相続後経過年数 = 基準日 − 直近の相続日
+    - years_since_extension    増築後経過年数 = 基準日 − 直近の増築日
 
-    all_items = []
+    採用ルール（issue #1777 の設計判断）:
+    - 相続・増築が複数ある場合は直近（最新）の発生日を採用
+    - 築年数は最古の登記日付を起点
+    - 基準日を超える未来日のイベントは除外
+    該当イベントが無い指標は空文字。
+    """
+    oldest: dict = {}
+    inheritance: dict = {}
+    extension: dict = {}
 
-    # Use itertuples for better performance than iterrows
-    for row in df.itertuples():
-        idx = row.Index
-        events_json = getattr(row, "events_json_touki_residence", "")
-        # Check for None, pd.NA, empty string (avoid boolean conversion of NA)
-        try:
-            if pd.isna(events_json):
-                continue
-        except (TypeError, ValueError):
-            pass
-        if not events_json or (isinstance(events_json, str) and not events_json.strip()):
-            continue
+    if "events_json_touki_residence" in df.columns:
+        for row in df.itertuples():
+            idx = row.Index
+            events = _parse_events_json(
+                getattr(row, "events_json_touki_residence", "")
+            )
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                reason = str(event.get("reason") or "").strip()
+                parsed = parse_yyyymmdd(event.get("date"))
+                if parsed is None:
+                    continue
+                event_date = pd.Timestamp(parsed)
+                if event_date > base_date:
+                    continue
+                if idx not in oldest or event_date < oldest[idx]:
+                    oldest[idx] = event_date
+                if "相続" in reason and (
+                    idx not in inheritance or event_date > inheritance[idx]
+                ):
+                    inheritance[idx] = event_date
+                if "増築" in reason and (
+                    idx not in extension or event_date > extension[idx]
+                ):
+                    extension[idx] = event_date
 
-        try:
-            # Handle double-quoted JSON from CSV (pandas escape)
-            # Replace double quotes with single quotes if needed
-            if isinstance(events_json, str):
-                # Fix double quotes that may occur from CSV reading
-                # Replace "" with " (but be careful not to break valid JSON)
-                events_json_clean = events_json.replace('""', '"')
-                events = json.loads(events_json_clean)
-            else:
-                events = events_json
-        except (json.JSONDecodeError, TypeError):
-            continue
+    def _years_since(picked: dict) -> pd.Series:
+        col = pd.Series([""] * len(df), index=df.index, dtype=object)
+        for idx, event_date in picked.items():
+            years = int((base_date - event_date).days // 365.25)
+            col.loc[idx] = str(years)
+        return col
 
-        if not isinstance(events, list):
-            continue
-
-        for event in events:
-            if not isinstance(event, dict):
-                continue
-                
-            # Get values, handling None/null from JSON
-            reason_raw = event.get("reason")
-            date_str_raw = event.get("date")
-            
-            # Convert None to empty string, then to string and strip
-            reason = str(reason_raw).strip() if reason_raw is not None else ""
-            date_str = str(date_str_raw).strip() if date_str_raw is not None else ""
-
-            if not reason or not date_str:
-                continue
-
-            # Check if reason matches target pattern
-            if not target_pattern.search(reason):
-                continue
-
-            # Parse date - use parse_yyyymmdd directly for single value
-            try:
-                # Try parse_yyyymmdd first (faster for single value)
-                date_val = None
-                date_str_clean = date_str.strip()
-                
-                # Check if it's 8-digit format
-                if date_str_clean.isdigit() and len(date_str_clean) == 8:
-                    try:
-                        date_val = pd.to_datetime(date_str_clean, format="%Y%m%d", errors="coerce")
-                    except Exception:
-                        pass
-                
-                # Fallback to parse_yyyymmdd_series if needed
-                if pd.isna(date_val):
-                    date_val = parse_yyyymmdd_series(pd.Series([date_str])).iloc[0]
-            except Exception:
-                continue
-
-            if pd.isna(date_val) or date_val > base_date:
-                continue
-
-            all_items.append({
-                "row_idx": idx,
-                "date": date_val,
-                "reason": str(reason).strip(),
-            })
-
-    if not all_items:
-        df["date_registration_event"] = ""
-        df["registration_reason"] = ""
-        df["days_since_registration_event"] = ""
-        return df
-
-    merged = pd.DataFrame(all_items)
-
-    idxmax = merged.groupby("row_idx")["date"].idxmax()
-    best = merged.loc[idxmax].set_index("row_idx")
-
-    best_date = best["date"].reindex(df.index)
-    best_reason = best["reason"].reindex(df.index)
-
-    df["date_registration_event"] = best_date.dt.strftime("%Y/%m/%d").fillna("")
-    df["registration_reason"] = best_reason.fillna("")
-
-    df["days_since_registration_event"] = ""
-    mask_valid = best_date.notna()
-    if mask_valid.any():
-        df.loc[mask_valid, "days_since_registration_event"] = (
-            (base_date - best_date[mask_valid])
-            .dt.days.astype("Int64")
-            .astype(str)
-        )
-
+    df["building_age_years"] = _years_since(oldest)
+    df["years_since_inheritance"] = _years_since(inheritance)
+    df["years_since_extension"] = _years_since(extension)
     return df
 
 
@@ -1246,8 +860,8 @@ def add_structure_and_reason_flags(
 
     base_date = parse_base_date(base_date_str)
 
-    # 0. 登記事由発生日・登記事由・経過日
-    df = pick_reason_and_date_near_base(df, base_date)
+    # 0. 案E: 事由別の経過年数（築年数 / 相続後経過年数 / 増築後経過年数）
+    df = add_registration_duration_features(df, base_date)
     # ==========================
     # 1. 登記構造 → 構造フラグ
     # ==========================
@@ -1323,66 +937,6 @@ def add_structure_and_reason_flags(
     df.loc[mask_wood, "flag_wood"] = "1"
     df.loc[mask_soil, "flag_earthen"] = "1"
     df.loc[mask_other, "flag_otherstructures"] = "1"
-
-    # 2. 登記事由_内容* → 種別フラグ（相続/贈与/売買/差押）
-    # Parse all reasons from JSON
-    concat_reason = pd.Series([""] * len(df), index=df.index)
-    if "events_json_touki_residence" in df.columns:
-        # Use itertuples for better performance
-        for row in df.itertuples():
-            idx = row.Index
-            events_json = getattr(row, "events_json_touki_residence", "")
-            # Check for None, pd.NA, empty string (avoid boolean conversion of NA)
-            try:
-                if pd.isna(events_json):
-                    continue
-            except (TypeError, ValueError):
-                pass
-            if events_json and (not isinstance(events_json, str) or events_json.strip()):
-                try:
-                    # Handle double-quoted JSON from CSV
-                    if isinstance(events_json, str):
-                        events_json_clean = events_json.replace('""', '"')
-                        events = json.loads(events_json_clean)
-                    else:
-                        events = events_json
-                    if isinstance(events, list):
-                        reasons = [
-                            str(e.get("reason", "")).strip() 
-                            for e in events 
-                            if isinstance(e, dict) and e.get("reason")
-                        ]
-                        concat_reason.loc[idx] = " ".join(reasons)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-    
-    # Fallback to old columns if exists (for backward compatibility)
-    reason_cols = [c for c in df.columns if c.startswith("extracted_registration_reason")]
-    if reason_cols:
-        mask_missing = concat_reason == ""
-        old_reasons = (
-            df.loc[mask_missing, reason_cols].astype(str).fillna("").agg(" ".join, axis=1)
-        )
-        concat_reason.loc[mask_missing] = old_reasons
-    elif "registration_reason" in df.columns:
-        mask_missing = concat_reason == ""
-        concat_reason.loc[mask_missing] = df.loc[mask_missing, "registration_reason"].astype(str).fillna("")
-
-    for col in ["flag_inheritance", "flag_gift", "flag_sale", "flag_seizure"]:
-        df[col] = ""
-
-    df.loc[
-        concat_reason.str.contains("相続")
-        | concat_reason.str.contains("遺贈"),
-        "flag_inheritance",
-    ] = "1"
-    df.loc[concat_reason.str.contains("贈与"), "flag_gift"] = "1"
-    df.loc[concat_reason.str.contains("売買"), "flag_sale"] = "1"
-    df.loc[
-        concat_reason.str.contains("公売")
-        | concat_reason.str.contains("競売"),
-        "flag_seizure",
-    ] = "1"
 
     return df
 

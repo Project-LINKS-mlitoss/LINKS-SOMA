@@ -111,6 +111,18 @@ def main():
             # ジオコーディング済データ DT213
             "geocoding": (data_dict.get("geocoding", {}).get("path", None)),
             "geocoding_columns": (data_dict.get("geocoding", {}).get("columns", {})),
+            # 建物関連データ
+            "optional_data_source": (
+                data_dict.get("optional_data_source", {}).get("path", None)
+            ),
+            "optional_data_source_columns": (
+                data_dict.get("optional_data_source", {}).get("columns", {})
+            ),
+            # 空き家調査結果
+            "vacant_house": (data_dict.get("vacant_house", {}).get("path", None)),
+            "vacant_house_columns": (
+                data_dict.get("vacant_house", {}).get("columns", {})
+            ),
         }
 
         threshold = params.get("threshold", "0.8")
@@ -126,6 +138,8 @@ def main():
             "building_type_determination_columns", {}
         )
         geocoding_cols = params.get("geocoding_columns", {})
+        optional_data_source_cols = params.get("optional_data_source_columns", {})
+        vacant_house_cols = params.get("vacant_house_columns", {})
 
         columns = {
             "suido_status": {
@@ -145,11 +159,20 @@ def main():
                     building_type_determination_cols.get("address")
                 ),
             },
+            "optional_data_source": {
+                "optional_data_source_address": optional_data_source_cols.get(
+                    "address"
+                ),
+            },
+            "vacant_house": {
+                "vacant_house_address": vacant_house_cols.get("address"),
+            },
         }
         # Initialize job progress
         create_or_update_job(job_id, "2")
 
-        logs_dir = concatenate(params.get("output_path"), "logs")
+        # ジョブ単位ディレクトリに分離（ジョブ混在・証跡DLのため）
+        logs_dir = concatenate(params.get("output_path"), f"logs/job_{job_id}")
         os.makedirs(logs_dir, exist_ok=True)
         logger = get_rotating_logger(logs_dir, logger_name="IF005")
 
@@ -191,6 +214,18 @@ def main():
                 output_path_base, params.get("geocoding")
             )
             input_source.append("geocoding")
+
+        if params.get("optional_data_source"):
+            input_files["optional_data_source"] = concatenate(
+                output_path_base, params.get("optional_data_source")
+            )
+            input_source.append("optional_data_source")
+
+        if params.get("vacant_house"):
+            input_files["vacant_house"] = concatenate(
+                output_path_base, params.get("vacant_house")
+            )
+            input_source.append("vacant_house")
 
         # Validate: at least one input file must be provided
         if not input_files:

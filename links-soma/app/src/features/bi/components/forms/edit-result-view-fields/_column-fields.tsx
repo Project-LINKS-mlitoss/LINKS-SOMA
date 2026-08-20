@@ -11,6 +11,7 @@ import { Select } from "../../../../../shared/components/ui";
 import { DynamicParameterInput } from "../dynamic-parameter-input";
 import { FormGroupingResultView } from "../form-grouping-result-view";
 import { type UseEditResultViewFieldsReturnType } from "../../../hooks";
+import { getDefaultChartAggregation } from "../../../util/chart-aggregation";
 
 type Props = UseEditResultViewFieldsReturnType;
 
@@ -37,6 +38,9 @@ export const ColumnFields = ({
     (f) => f.key === "group_aggregation" && f.type === "group_aggregation",
   );
 
+  /** 円グラフは区分けと集計を同じカラムで行うため「値」を「ラベル」に固定する */
+  const isFixedToLabelColumnStyle = style === "pie";
+
   return (
     <>
       {columnFields.map((field, index) => {
@@ -60,11 +64,24 @@ export const ColumnFields = ({
                   column?.value as AREA_DATASET_COLUMN
                 ];
 
+          /**
+           * 円グラフは区分けと集計を同じカラムで行う（「値」は「ラベル」に固定）。
+           * 選択させる余地がないため非活性にし、ラベルと同じカラムを表示して固定関係を示す。
+           * 棒グラフ・折れ線グラフは軸ごとに別カラムを選ぶため対象外。
+           */
+          const isFixedToLabelColumn =
+            isFixedToLabelColumnStyle && field.key === "value";
+          const labelColumnValue = currentParameters.find(
+            (parameter) =>
+              parameter.key === "label" && parameter.type === "column",
+          )?.value;
+
           return (
             <Fragment key={field.key}>
               <DynamicParameterInput
                 type={fieldOption.type}
                 {...register(`parameters.${index}.value`)}
+                disabled={isFixedToLabelColumn}
                 fieldOption={fieldOption}
                 onChange={(e) => {
                   if (field.key === "label" || field.key === "xAxis") {
@@ -73,7 +90,20 @@ export const ColumnFields = ({
                         return f.type !== "group";
                       },
                     );
-                    replace(parametersWithoutGroup);
+                    /**
+                     * 円グラフの「値」はラベルに固定されるため、ラベルを変えたら
+                     * 保存されるパラメータも追随させる。表示だけ合わせると、
+                     * 保存済みビューの「値」が実際の集計対象と食い違ったまま残る。
+                     */
+                    replace(
+                      isFixedToLabelColumnStyle && field.key === "label"
+                        ? (parametersWithoutGroup.map((f) =>
+                            f.key === "value" && f.type === "column"
+                              ? { ...f, value: e.target.value }
+                              : f,
+                          ) as SelectResultView["parameters"]) // union の型推論が効きづらいため、明示的に型を指定
+                        : parametersWithoutGroup,
+                    );
                   }
 
                   update(index, {
@@ -83,7 +113,11 @@ export const ColumnFields = ({
                   } as SelectResultView["parameters"][0]); /** e.target.valueの型式別が難しいためas */
                 }}
                 unit={unit}
-                value={field.value}
+                value={
+                  isFixedToLabelColumn && labelColumnValue !== undefined
+                    ? labelColumnValue
+                    : field.value
+                }
               />
               {
                 // カラムでグルーピングが設定されている場合、グルーピング設定用のフォームを表示
@@ -110,12 +144,20 @@ export const ColumnFields = ({
               }
               {
                 /**
-                 * グルーピングが設定されている場合、集計単位を選択するフォームを表示
-                 * ただし、X軸など集計単位の指定が不要な場合は表示しない(fieldOption.grouping === false)
-                 * また、グルーピングが設定されていない場合も表示しない(groupingFields.length > 0)
+                 * 集計方法を選択するフォーム。X軸など集計単位の指定が不要な場合は表示しない
+                 * (fieldOption.grouping === false)。
+                 *
+                 * 効かない状況でも欄自体は残す。消すと設定の存在に気づけないため。
+                 * 円グラフ・折れ線グラフはラベルのグループがないと集計自体が起きない
+                 * （1行が1つの扇形・点になる）ので、そのときだけ非活性にする。
+                 * 棒グラフはグループがなくても地域名で集計するため常に効く。
                  */
-                fieldOption.grouping === false && groupingFields.length > 0 && (
+                fieldOption.grouping === false && (
                   <Select
+                    disabled={
+                      (style === "pie" || style === "line") &&
+                      groupingFields.length === 0
+                    }
                     onChange={(e) => {
                       const prevOtherParameters = currentParameters.filter(
                         (f) => {
@@ -132,9 +174,24 @@ export const ColumnFields = ({
                       ] as SelectResultView["parameters"]; // union の型推論が効きづらいため、明示的に型を指定;
                       replace(newParameters);
                     }}
-                    value={groupCalc?.value}
+                    /**
+                     * 未設定のビューでも取得側と同じ既定を表示する。
+                     * 値を渡さないと、ブラウザが非活性でない先頭の選択肢（値の合計）を
+                     * 選んだように見せてしまい、実際の集計と食い違う。
+                     */
+                    value={
+                      groupCalc?.value ?? getDefaultChartAggregation(style)
+                    }
                   >
-                    <option value="avg">値の平均</option>
+                    {/**
+                     * 円グラフは全体の内訳を表す図であり、扇形を足し合わせて全体になる集計しか
+                     * 成立しない。平均は足し合わせても全体にならないため選べないようにする。
+                     * 既存ビューが平均で保存されている場合に選択が空欄化しないよう、
+                     * 選択肢自体は残して非活性にする。
+                     */}
+                    <option disabled={style === "pie"} value="avg">
+                      値の平均
+                    </option>
                     <option value="sum">値の合計</option>
                     <option value="count">総件数（世帯数）</option>
                   </Select>

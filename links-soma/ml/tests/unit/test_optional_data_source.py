@@ -1,13 +1,13 @@
 """optional_data_source モジュールの単体テスト
 
-説明変数追加用データの住所結合・_odsサフィックス付与ロジックの検証。
+建物関連データの住所結合・_odsサフィックス付与ロジックの検証。
 """
 
 import pandas as pd
 
 
 class TestOptionalDataSource:
-    """説明変数追加用データの結合テスト"""
+    """建物関連データの結合テスト"""
 
     def test_merge_adds_columns_with_ods_suffix(self, tmp_path):
         """追加データのカラムが_odsサフィックス付きで結合される"""
@@ -98,3 +98,31 @@ class TestOptionalDataSource:
 
         result = merge_optional_data_source(main_df, None, "/tmp")
         assert list(result.columns) == list(main_df.columns)
+
+    def test_merge_stats_uses_sub_side_denominator(self, tmp_path):
+        """stats: 分母=追加用データ側の一意住所数、分子=水道に一致した数（#1775 結合率表示）
+
+        水道側=大手町1-1・駅前2-3。追加データ=大手町1-1(一致)・山奥9-9(不一致)。
+        → sub_rows=2, matched=1。
+        """
+        from preprocessing.record_linkage.optional_data_source import merge_optional_data_source
+
+        main_df = pd.DataFrame({
+            "water_supply_number": ["001", "002"],
+            "normalized_address": ["大手町1-1", "駅前2-3"],
+        })
+
+        csv_path = tmp_path / "custom.csv"
+        csv_path.write_text(
+            "住所,値\n"
+            "テスト市大手町1丁目1番,a\n"
+            "テスト市山奥9丁目9番,b\n",
+            encoding="utf-8",
+        )
+
+        cfg = {"file": "custom.csv", "columns": {"address": "住所"}}
+        stats = {}
+        merge_optional_data_source(main_df, cfg, tmp_path, municipality="テスト市", stats=stats)
+
+        assert stats["sub_rows"] == 2
+        assert stats["matched"] == 1

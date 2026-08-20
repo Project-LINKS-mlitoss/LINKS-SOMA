@@ -9,7 +9,8 @@ import { sql } from "drizzle-orm";
 import { type JobParameters } from "../shared/types/job-parameters";
 import { type JobTaskResult } from "../shared/types/job-task-result";
 import { type OptionalDataSourceEntry } from "../shared/types/optional-data-source";
-import { type Parameter } from "../features/bi/types";
+import { type Parameter, type ViewTemplateView } from "../features/bi/types";
+import { type TutorialResumeState } from "../shared/types/tutorial-resume";
 import { VIEW_STYLES } from "../shared/config/view-styles";
 
 export const users = sqliteTable("users", {
@@ -91,6 +92,35 @@ export const result_views = sqliteTable("result_views", {
 
 export type SelectResultView = typeof result_views.$inferSelect;
 export type InsertResultView = typeof result_views.$inferInsert;
+
+/**
+ * ビューテンプレート（FR021: ビュープリセット・名前付き保存）。
+ *
+ * ユーザーが名前付き保存したテンプレートのみを保持する。
+ * SOMA 定義のシステムプリセットはコード定数（features/bi/config/view-presets.ts）側にあり、本テーブルには入らない。
+ * views は data_set_result_id を含まないビュー定義の配列。適用時に推定結果データを毎回バインドする。
+ */
+export const view_templates = sqliteTable("view_templates", {
+  id: integer("id").primaryKey(),
+  name: text("name").notNull(),
+  // 業務的な意図の説明（任意）。一覧カードに表示する。未入力は null。
+  description: text("description"),
+  views: text("views", {
+    mode: "json",
+  })
+    .$type<ViewTemplateView[]>()
+    .notNull(),
+  created_at: text("created_at")
+    .default(sql`(CURRENT_TIMESTAMP)`)
+    .notNull(),
+  updated_at: text("updated_at")
+    .default(sql`(CURRENT_TIMESTAMP)`)
+    .notNull()
+    .$onUpdate(() => sql`(CURRENT_TIMESTAMP)`),
+});
+
+export type SelectViewTemplate = typeof view_templates.$inferSelect;
+export type InsertViewTemplate = typeof view_templates.$inferInsert;
 
 export const data_set_results = sqliteTable("data_set_results", {
   id: integer("id").primaryKey(),
@@ -307,6 +337,51 @@ export const data_set_detail_buildings = sqliteTable(
      */
     predicted_probability: real("predicted_probability"),
 
+    /**
+     * 空き家推定確率の変化率（最古年度比）
+     *
+     * 同一建物（normalized_address）の predicted_probability を reference_date 昇順に並べ、
+     * 最古年度を基準にした相対変化率 (p − p_最古) / p_最古。
+     * 複数年度の推定結果でのみ算出。単一年度・基準値0・比較対象なしのときは NULL。
+     */
+    predicted_probability_change_rate_from_oldest: real(
+      "predicted_probability_change_rate_from_oldest",
+    ),
+
+    /**
+     * 空き家推定確率の変化率（前年度比）
+     *
+     * 同一建物の直前の観測年度を基準にした相対変化率 (p − p_前) / p_前。
+     * 複数年度の推定結果でのみ算出。最古年度行・基準値0のときは NULL。
+     */
+    predicted_probability_change_rate_from_previous: real(
+      "predicted_probability_change_rate_from_previous",
+    ),
+
+    /**
+     * 空き家調査結果の実測ラベル（名寄せで空き家調査結果を結合した場合のみ値を持つ）
+     *
+     * 1: 調査で空き家と確認 / 0: 未確認。predicted_label（モデル推定）とは別物。
+     */
+    is_vacant: integer("is_vacant"),
+
+    /** 空き家の区分（空き家 / 特定空家 等）。is_vacant=1 の行のみ値を持つ */
+    vacant_type: text("vacant_type"),
+
+    /** 空き家調査結果の出所。is_vacant=1 の行のみ値を持つ */
+    vacant_source: text("vacant_source"),
+
+    /** 空き家調査の実施年度。is_vacant=1 の行のみ値を持つ */
+    vacant_year: text("vacant_year"),
+
+    /**
+     * 空き家調査結果の住所が番地・号レベルの詳細を欠く場合に 1
+     *
+     * 建物を一意に特定できず、近隣建物の水道・住基データが誤って
+     * 割り当たる可能性を示す。判定は is_vacant=1 の行にのみ行う。
+     */
+    address_precision_flag: integer("address_precision_flag"),
+
     /** 閾値別空き家推定結果（5%刻み、19パターン） */
     predicted_label_05: integer("predicted_label_05"),
     predicted_label_10: integer("predicted_label_10"),
@@ -334,7 +409,6 @@ export const data_set_detail_buildings = sqliteTable(
     buildingtype_determination_not_possible_flag: integer(
       "buildingtype_determination_not_possible_flag",
     ), // 1: 家屋種別の判定ができない / 0: 家屋種別の判定ができる
-    days_since_registration_event: integer("days_since_registration_event"), // 1: 相続がある / 0: 相続がない
 
     /** R7新規追加分 */
     address: text("address"), // 建築物住所
@@ -405,9 +479,9 @@ export const data_set_detail_buildings = sqliteTable(
     lat_geocoding: real("lat_geocoding"), // 緯度
     level_geocoding: text("level_geocoding"), // 空間レベル
     confidency_geocoding: text("confidency_geocoding"), // 空間精度
-    address_for_building_type: text("address_for_building_type"), // 推定対象選定用データ住所
-    latitude_for_building_type: real("latitude_for_building_type"), // 推定対象選定用データ緯度
-    longitude_for_building_type: real("longitude_for_building_type"), // 推定対象選定用データ経度
+    address_for_building_type: text("address_for_building_type"), // 処理対象選定用データ住所
+    latitude_for_building_type: real("latitude_for_building_type"), // 処理対象選定用データ緯度
+    longitude_for_building_type: real("longitude_for_building_type"), // 処理対象選定用データ経度
     num_deaths: integer("num_deaths"), // 死亡人数
     num_inmigrants: integer("num_inmigrants"), // 転入数
     num_outmigrants_relocations: integer("num_outmigrants_relocations"), // 転出・転居数
@@ -429,17 +503,15 @@ export const data_set_detail_buildings = sqliteTable(
     flag_wood: integer("flag_wood"), // 木造
     flag_earthen: integer("flag_earthen"), // 土造
     flag_otherstructures: integer("flag_otherstructures"), // その他構造
-    flag_inheritance: integer("flag_inheritance"), // 相続
-    flag_gift: integer("flag_gift"), // 贈与
-    flag_sale: integer("flag_sale"), // 売買
-    flag_seizure: integer("flag_seizure"), // 差押
+    building_age_years: integer("building_age_years"), // 築年数 = 基準日 − 最古登記日付（満年数）
+    years_since_inheritance: integer("years_since_inheritance"), // 相続後経過年数 = 基準日 − 直近相続日（満年数）
+    years_since_extension: integer("years_since_extension"), // 増築後経過年数 = 基準日 − 直近増築日（満年数）
     date_inheritance: text("date_inheritance"), // 相続日
     has_geocoding: integer("has_geocoding"), // ジオコーディング有無フラグ
     bldg_id: text("bldg_id"), // 建物データ番号
     members_under_15: integer("members_under_15"), // 15歳未満人数
     members_over_65: integer("members_over_65"), // 65歳以上人数
     registration_date: text("registration_date"), // 登記日付
-    date_registration_event: text("date_registration_event"), // 登記事由発生日
     waterusage_11to12m_ago: real("waterusage_11to12m_ago"), // 検針水量（推定月の11・12ヶ月前）
     waterusage_9to10m_ago: real("waterusage_9to10m_ago"), // 検針水量（推定月の9・10ヶ月前）
     waterusage_7to8m_ago: real("waterusage_7to8m_ago"), // 検針水量（推定月の7・8ヶ月前）
@@ -658,6 +730,10 @@ export const normalized_data_sets = sqliteTable("normalized_data_sets", {
   file_name: text("file_name"),
   // job_resultsの内部パス / NOT NULL
   file_path: text("file_path").notNull(),
+  // 名寄せの目的。既存行は null（目的未記録）。
+  purpose: text("purpose", {
+    enum: ["vacancy_estimation", "model_training"],
+  }),
   job_results_id: integer("job_results_id").references(() => job_results.id),
   created_at: text("created_at")
     .default(sql`(CURRENT_TIMESTAMP)`)
@@ -792,3 +868,43 @@ export const model_files = sqliteTable("model_files", {
 
 export type SelectModelFile = typeof model_files.$inferSelect;
 export type InsertModelFile = typeof model_files.$inferInsert;
+
+/**
+ * ガイド（チュートリアル）進行状態の永続化（ADR-0024）。
+ *
+ * singleton（1 行）。
+ * `jobs`（判別列 status/type + 可変 parameters json）と同型:
+ * - SSOT 参照かつ上書きガード照会が要る draft_job_id のみ FK 列に昇格
+ * - 現 stage の可変な復元ペイロードは resume_state json に集約（linear 進行ゆえ 1 stage 分）
+ */
+export const tutorial_state = sqliteTable("tutorial_state", {
+  id: integer("id").primaryKey(),
+  phase: text("phase", {
+    enum: ["idle", "running", "paused", "done"],
+  }).notNull(),
+  stage: text("stage", {
+    enum: ["normalization", "model", "evaluation", "analysis"],
+  }),
+  // モデル構築の要否（開始時に選択）。build=モデル構築あり、generic=汎用モデル利用でモデル工程をスキップ。
+  // null は未選択（旧データ互換）。工程順・必須データ・推定時の利用モデルを分岐する（ADR-0024）。
+  model_mode: text("model_mode", { enum: ["build", "generic"] }),
+  // 名寄せ stage の draft 参照。SSOT・上書きガード対象なので FK 列に出す。
+  draft_job_id: integer("draft_job_id").references(() => jobs.id),
+  // モデル/推定 stage の実行ジョブ参照（進行状態バッジ用。名寄せの draft_job_id と同型）。
+  model_job_id: integer("model_job_id").references(() => jobs.id),
+  evaluation_job_id: integer("evaluation_job_id").references(() => jobs.id),
+  // 現 stage の復元ペイロード（model/evaluation の選択 snapshot、analysis の workbook/sheet/view）。
+  resume_state: text("resume_state", {
+    mode: "json",
+  }).$type<TutorialResumeState>(),
+  created_at: text("created_at")
+    .default(sql`(CURRENT_TIMESTAMP)`)
+    .notNull(),
+  updated_at: text("updated_at")
+    .default(sql`(CURRENT_TIMESTAMP)`)
+    .notNull()
+    .$onUpdate(() => sql`(CURRENT_TIMESTAMP)`),
+});
+
+export type SelectTutorialState = typeof tutorial_state.$inferSelect;
+export type InsertTutorialState = typeof tutorial_state.$inferInsert;

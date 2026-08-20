@@ -31,6 +31,8 @@ import { useDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { downloadDataSetFile } from "../../../../shared/utils/download-data-set-file";
 import { rendererLogger } from "../../../../shared/utils/renderer-logger";
 import { handleUpload, handleUploadButtonClick } from "../../pages/_util";
+import { detectNonUtf8Files } from "../../../../shared/utils/detect-non-utf8-files";
+import { EncodingWarning } from "../../../../shared/components/encoding-warning";
 import { DataPreviewDialog } from "./data-preview-dialog";
 import { EditNameDialog } from "./edit-name-dialog";
 import { DeleteDataSetRowDialog } from "./delete-dataset-row-dialog";
@@ -92,6 +94,7 @@ export function RawDataSetTable(): JSX.Element {
   const styles = useStyles();
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [nonUtf8Files, setNonUtf8Files] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDeleteSelectedItems = async (): Promise<void> => {
@@ -187,7 +190,12 @@ export function RawDataSetTable(): JSX.Element {
           <input
             ref={fileInputRef}
             multiple
-            onChange={async (e) => handleUpload(e, "raw").then(() => mutate())}
+            onChange={async (e) => {
+              // PV-01 文字コード: 非UTF-8 を非ブロッキングで注意（保存は止めない）。
+              setNonUtf8Files(await detectNonUtf8Files(e.target.files ?? []));
+              await handleUpload(e, "raw");
+              await mutate();
+            }}
             style={{ display: "none" }}
             type="file"
           />
@@ -212,6 +220,7 @@ export function RawDataSetTable(): JSX.Element {
           />
         </div>
       </div>
+      <EncodingWarning fileNames={nonUtf8Files} />
       <div className={styles.datasetList}>
         <Table>
           <TableHeader className={styles.tableHeader}>

@@ -20,6 +20,10 @@ import {
   DEFAULT_FUZZY_CHAR,
   FormatterProvider,
 } from '@digital-go-jp/abr-geocoder/build/index';
+import {
+  clearPrefectureCompleterCache,
+  getPrefectureCompleter,
+} from './abr-prefecture';
 const { Downloader } = require('@digital-go-jp/abr-geocoder/build/usecases/download/download-process');
 const { createGeocodeCaches } = require('@digital-go-jp/abr-geocoder/build/usecases/geocode/services/create-geocode-caches');
 // Match the CLI's MAX_CONCURRENT_DOWNLOAD (defined in @digital-go-jp/abr-geocoder/build/config/constant-values).
@@ -379,6 +383,7 @@ async function deleteAbrData(): Promise<{ success: boolean; message: string }> {
     // Delete directory recursively
     fs.rmSync(abrDataDir, { recursive: true, force: true });
     
+    clearPrefectureCompleterCache();
     console.log(`[ABR] Data deleted successfully`);
     return { success: true, message: 'データが削除されました' };
   } catch (error: any) {
@@ -449,6 +454,7 @@ async function downloadAbrData(
       return { success: false, message: msg };
     }
 
+    clearPrefectureCompleterCache();
     console.log(`[ABR] Download completed successfully`);
     return { success: true, message: 'Download completed successfully' };
   } catch (error: any) {
@@ -469,16 +475,26 @@ type GeocodeResult = {
   rsdtAddrFlg?: number;
 };
 
+// 有限な数値のみを返す。それ以外（null / undefined / NaN / 数値化できない文字列）は undefined。
+function toFiniteNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(num) ? num : undefined;
+}
+
 // Convert a single parsed JSON element from FormatterProvider(JSON) to UI shape.
 function normalizeAbrResultItem(item: any, fallbackAddress: string): GeocodeResult {
   const inner = item?.result ?? item;
-  if (!inner || inner.lat === undefined || inner.lon === undefined) {
+  // 住所を特定できない場合、abr-geocoder は lat / lon に null を返す。
+  const lat = toFiniteNumber(inner?.lat);
+  const lon = toFiniteNumber(inner?.lon);
+  if (lat === undefined || lon === undefined) {
     return { success: false, errorMessage: '該当する住所が見つかりませんでした' };
   }
   return {
     success: true,
-    lat: typeof inner.lat === 'number' ? inner.lat : parseFloat(inner.lat),
-    lon: typeof inner.lon === 'number' ? inner.lon : parseFloat(inner.lon),
+    lat,
+    lon,
     label: inner.output || inner.address || inner.label || fallbackAddress,
     score: inner.score !== undefined
       ? (typeof inner.score === 'number' ? inner.score : parseFloat(inner.score))
@@ -515,7 +531,9 @@ async function geocodeBatchWithAbr(addresses: string[]): Promise<GeocodeResult[]
     });
 
     const formatter = FormatterProvider.get({ type: OutputFormat.JSON, debug: false });
-    const source = Readable.from(addresses.map(a => `${a}\n`));
+    const completer = await getPrefectureCompleter(container);
+    const queries = addresses.map(a => completer.complete(a));
+    const source = Readable.from(queries.map(a => `${a}\n`));
 
     let collected = '';
     const sink = new Writable({

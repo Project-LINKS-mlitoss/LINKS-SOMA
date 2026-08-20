@@ -127,7 +127,7 @@ def build_runtime_config(params: dict, output_path: str) -> dict:
             "vacant_source_val": labels_data.get("vacant_source_val", ""),
         }
 
-    # ── Optional data source (説明変数追加用データ) ─────────────────────
+    # ── Optional data source (建物関連データ) ─────────────────────
     ods = data.get("optional_data_source", {})
     ods_cols = ods.get("columns", {})
     optional_data_source_cfg = None

@@ -323,6 +323,12 @@ export const DialogJoinCheck = ({
             if (jobParams?.data?.building_type_determination) {
               targets.push("building_type_determination");
             }
+            if (jobParams?.data?.vacant_house) {
+              targets.push("vacant_house");
+            }
+            if (jobParams?.data?.optional_data_source) {
+              targets.push("optional_data_source");
+            }
 
             if (targets.length > 0) {
               const initialResults: JoinResult[] = targets.map((target) => ({

@@ -11,12 +11,10 @@
     "make": "npm run rebuild && npm exec electron-forge make",
     "package": "npm run rebuild && npm exec electron-forge package",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
-
     "lint": "npm run lint:eslint && npm run lint:type",
     "lint:eslint": "eslint --ext .ts,.tsx .",
     "lint:type": "tsc --noEmit --project tsconfig.base.json",
     "gen:migration": "drizzle-kit generate",
-
     "test:unit": "vitest",
     "e2e:check-dev": "curl -sf http://localhost:5173 > /dev/null || (echo 'ERROR: dev server not running. Start it with: npm run dev' && exit 1)",
     "e2e": "npm run e2e:check-dev && E2E_DEV_MODE=true playwright test",
@@ -25,7 +23,6 @@
     "script": "E2E_DEV_MODE=true playwright test -c playwright.script.config.ts",
     "script:built": "playwright test -c playwright.script.config.ts",
     "script:help": "node scripts/list-tests.js script",
-
     "ipc:snapshot": "tsx scripts/verify-ipc-channels.ts snapshot",
     "ipc:verify": "tsx scripts/verify-ipc-channels.ts verify"
   },
@@ -95,6 +92,7 @@
     "@ngageoint/geopackage": "github:HideBa/geopackage-js",
     "better-sqlite3": "^11.2.1",
     "electron-squirrel-startup": "^1.0.1",
+    "react-range": "^1.10.0",
     "vite-plugin-native": "^2.2.1"
   },
   "optionalDependencies": {

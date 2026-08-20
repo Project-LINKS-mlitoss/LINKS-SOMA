@@ -37,14 +37,14 @@ export async function mockAwsApi(page: Page) {
     async (route) => {
       const request = route.request();
       const postData = request.postDataJSON();
-      const address = postData?.Text || "";
+      const address = postData?.QueryText || "";
 
       // 空文字や存在しない住所はエラーレスポンス
       if (!address || address.includes("存在しない")) {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ Results: [] }),
+          body: JSON.stringify({ ResultItems: [] }),
         });
         return;
       }
@@ -53,14 +53,13 @@ export async function mockAwsApi(page: Page) {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          Results: [
+          ResultItems: [
             {
-              Place: {
-                Geometry: {
-                  Point: [MOCK_COORDINATES.lon, MOCK_COORDINATES.lat], // AWS は [lon, lat] 順
-                },
-                Label: address,
-              },
+              PlaceId: "mock-place-id",
+              PlaceType: "PointAddress",
+              Title: address,
+              Address: { Label: address },
+              Position: [MOCK_COORDINATES.lon, MOCK_COORDINATES.lat], // AWS は [lon, lat] 順
             },
           ],
         }),
@@ -78,11 +77,12 @@ export async function mockNttApi(page: Page) {
     const url = new URL(route.request().url());
     const address = url.searchParams.get("string") || "";
 
+    // NTT はエラー・結果なしのいずれも HTTP 200 で返し、status で区別する
     if (!address || address.includes("存在しない")) {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ geocoding: [] }),
+        body: JSON.stringify({ status: "zero results" }),
       });
       return;
     }
@@ -91,11 +91,13 @@ export async function mockNttApi(page: Page) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
+        status: "success",
         geocoding: [
           {
             lat: String(MOCK_COORDINATES.lat),
             lon: String(MOCK_COORDINATES.lon),
             addr: address,
+            level: "6",
           },
         ],
       }),
@@ -124,14 +126,24 @@ export async function mockAbrApi(electronApp: ElectronApplication) {
           errorMessage: "該当する住所が見つかりませんでした",
         };
       }
+      // 住所を特定できない場合、abr-geocoder は lat / lon に null を返す
+      if (address.includes("座標なし")) {
+        return {
+          success: true,
+          lat: null,
+          lon: null,
+          label: address,
+          coordinateLevel: "unknown",
+        };
+      }
       return {
         success: true,
         lat: 35.6896,
         lon: 139.6922,
         label: address,
         score: 1.0,
-        matchLevel: "住居表示",
-        coordinateLevel: "街区",
+        matchLevel: "residential_detail",
+        coordinateLevel: "residential_detail",
         rsdtAddrFlg: 1,
       };
     });
@@ -149,14 +161,24 @@ export async function mockAbrApi(electronApp: ElectronApplication) {
             errorMessage: "該当する住所が見つかりませんでした",
           };
         }
+        // 住所を特定できない場合、abr-geocoder は lat / lon に null を返す
+        if (address.includes("座標なし")) {
+          return {
+            success: true,
+            lat: null,
+            lon: null,
+            label: address,
+            coordinateLevel: "unknown",
+          };
+        }
         return {
           success: true,
           lat: 35.6896,
           lon: 139.6922,
           label: address,
           score: 1.0,
-          matchLevel: "住居表示",
-          coordinateLevel: "街区",
+          matchLevel: "residential_detail",
+          coordinateLevel: "residential_detail",
           rsdtAddrFlg: 1,
         };
       });

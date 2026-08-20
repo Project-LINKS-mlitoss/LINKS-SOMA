@@ -20,10 +20,14 @@ import { lang } from "../../../../../shared/config/lang";
 import { translateColumnToJapanese } from "../../../../../shared/column-translation-utils";
 import { ResultTable } from "../table/result-table";
 import { QueryHeader, QueryHeaderWrapper } from "../../shared/query-header";
-import { VacancyLevelCheckbox } from "./vacancy-level-checkbox";
-import { useVacancyLevelCheckbox } from "./vacancy-level-checkbox/hooks";
+import { resolveColorProperty } from "../../../util/map/color-column";
+import { extractThresholdFromParameters } from "../../../util/threshold-column-utils";
+import { ProbabilityRangeSlider } from "./probability-range-slider";
+import { useProbabilityRange } from "./probability-range-slider/hooks";
 import { ReferenceDateDropdown } from "./reference-date-dropdown";
 import { useReferenceDateDropdown } from "./reference-date-dropdown/hooks";
+import { ColorColumnControl } from "./color-column-control";
+import { useColorColumnControl } from "./color-column-control/hooks";
 import {
   Map,
   MapCenterButtons,
@@ -137,18 +141,44 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
 
   const mapInitState = useMapInit();
 
-  const vacancyLevelCheckboxState = useVacancyLevelCheckbox({
-    unit,
-  });
   const referenceDateDropdown = useReferenceDateDropdown({
     dataSetResultId: view.dataSetResultId,
   });
-  const { getFeatureById } = useFeatureFetcher({ unit });
+  // 最古の推定基準日。取得順に依存しないよう辞書順の最小値で求める（ISO 日付）。
+  const oldestReferenceDate = referenceDateDropdown.referenceDates?.length
+    ? [...referenceDateDropdown.referenceDates].sort()[0]
+    : undefined;
+  const { getFeatureById, getFeatureByReferenceDate } = useFeatureFetcher({
+    unit,
+  });
+
+  const colorColumnControl = useColorColumnControl({
+    referenceDates: referenceDateDropdown.referenceDates,
+    selectedDate: referenceDateDropdown.selectedDate,
+    oldestReferenceDate,
+    unit,
+  });
+
+  // 絞り込みは色分けの基準と同じ量を対象にする（軸・ラベル・凡例を一致させる）
+  const probabilityRangeState = useProbabilityRange({
+    dataSetResultId,
+    unit,
+    colorColumn: colorColumnControl.colorColumn,
+  });
+  const activeColorProperty = resolveColorProperty(
+    colorColumnControl.colorColumn,
+    unit,
+    extractThresholdFromParameters(view.parameters),
+  ).propertyName;
 
   const usePopupEffectWithFeatureState = usePopupEffectWithFeature({
     mapInstance: mapInitState.mapInstance,
     view,
     getFeatureById,
+    getFeatureByReferenceDate,
+    selectedDate: referenceDateDropdown.selectedDate,
+    oldestReferenceDate,
+    domainMax: probabilityRangeState.probabilityDomainMax,
   });
 
   const viewportLayerEffectState = useViewportLayerEffect({
@@ -156,6 +186,10 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
     selectedDate: referenceDateDropdown.selectedDate,
     view,
     setSelectedFeature: usePopupEffectWithFeatureState.setSelectedFeature,
+    // 確率グラデーションの上限。スライダーの軸（変化率で ±50%）を渡すと
+    // レイヤーが作り直され、色分け切替のたびに再取得が走る
+    domainMax: probabilityRangeState.probabilityDomainMax,
+    colorColumn: colorColumnControl.colorColumn,
   });
 
   const areaFilter = parameters.find((p) => p.key === "area");
@@ -172,13 +206,15 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
     unit,
   });
 
-  /** マップに表示される指標 */
+  /** マップに表示される指標。色分けの基準を切り替えるとスライダーの軸も入れ替わる */
   const meta = useMemo(
     () => ({
-      label: translateColumnToJapanese("predicted_probability", unit),
-      description: lang.columns[unit].predicted_probability.description,
+      label: translateColumnToJapanese(activeColorProperty, unit),
+      description: (
+        lang.columns[unit] as Record<string, { description?: string }>
+      )[activeColorProperty]?.description,
     }),
-    [unit],
+    [activeColorProperty, unit],
   );
 
   const [withTable, setWithTable] = useState(false);
@@ -201,7 +237,7 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
                 />
               </div>
               <div>
-                <VacancyLevelCheckbox {...vacancyLevelCheckboxState} />
+                <ProbabilityRangeSlider {...probabilityRangeState} />
               </div>
             </div>
             <div className={styles.filter}>
@@ -212,6 +248,14 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
                 <ReferenceDateDropdown {...referenceDateDropdown} />
               </div>
             </div>
+            {colorColumnControl.isChangeRateSelectable ? (
+              <div className={styles.filter}>
+                <div>色分けの基準</div>
+                <div>
+                  <ColorColumnControl {...colorColumnControl} />
+                </div>
+              </div>
+            ) : null}
             <div className={styles.filter}>
               <div>表</div>
               <Switch
@@ -258,9 +302,11 @@ export const ViewMapWithTable = ({ view, isPreview }: Props): JSX.Element => {
               <ZoomWarningOverlay unit={unit} />
             )}
             <Map
+              domainMax={probabilityRangeState.domainMax}
+              domainMin={probabilityRangeState.domainMin}
+              filterProperty={activeColorProperty}
               mapInitState={mapInitState}
-              vacancyLevels={vacancyLevelCheckboxState.vacancyLevels}
-              view={view}
+              range={probabilityRangeState.range}
               viewportLayerEffectState={viewportLayerEffectState}
             />
           </div>

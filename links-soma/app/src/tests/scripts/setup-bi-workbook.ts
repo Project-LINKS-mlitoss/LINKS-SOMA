@@ -9,6 +9,10 @@
  * 前提条件:
  * 1. 名寄せ処理が完了済み（script-run-normalization.ts を先に実行）
  * 2. 空き家推定が完了済み（script-run-estimation.ts を先に実行）
+ *
+ * 注意: ビューは選択ダイアログの先頭（＝最新）の推定結果データに紐づく。
+ * 棒グラフは地域単位のため、最新の推定結果が地域集計を含まない場合は
+ * データが無く描画されない（bi-operations の「チャートが表示されること」が失敗する）。
  */
 
 import { test, expect, type Page } from "@playwright/test";
@@ -121,8 +125,29 @@ test("ワークブック「E2Eテスト用」を作成してビューを設定�
       `📌 Step ${stepNum}: ビュー「${viewDef.title}」を追加・設定します`,
     );
 
-    // 「ビューを追加」をクリック
+    // 「ビューを追加」は2ステップダイアログを開く（#1909）。
+    // Step1 で「空から作る」を選び、Step2 で推定結果データを選ぶと空ビューが1つ作られる。
     await page.getByRole("button", { name: "ビューを追加" }).click();
+    await page.waitForSelector('[role="dialog"]');
+    const addDialog = page.locator('[role="dialog"]');
+
+    await addDialog.getByText("空から作る", { exact: true }).click();
+    await addDialog.getByRole("button", { name: "次へ" }).click();
+    await page.waitForTimeout(500);
+
+    // データセットを選択（最新の推定結果 = 先頭のoption）
+    const dialogDatasetSelect = addDialog.getByLabel("データセットを選択");
+    const dialogFirstValue = await dialogDatasetSelect
+      .locator("option")
+      .first()
+      .getAttribute("value");
+    if (dialogFirstValue) {
+      await dialogDatasetSelect.selectOption(dialogFirstValue);
+      await page.waitForTimeout(300);
+    }
+
+    await addDialog.getByRole("button", { name: "追加する" }).click();
+    await page.waitForSelector('[role="dialog"]', { state: "hidden" });
     await page.waitForTimeout(2000);
 
     // サイドバーフォームが表示されるのを待機
@@ -131,15 +156,6 @@ test("ワークブック「E2Eテスト用」を作成してビューを設定�
     });
 
     // --- フォーム設定 ---
-
-    // データセットを選択（最新の推定結果 = 先頭のoption）
-    const datasetSelect = page.getByLabel("データセットを選択");
-    const firstOption = datasetSelect.locator("option").first();
-    const firstValue = await firstOption.getAttribute("value");
-    if (firstValue) {
-      await datasetSelect.selectOption(firstValue);
-      await page.waitForTimeout(300);
-    }
 
     // タイトル入力
     const titleInput = page.getByLabel("ビューのタイトル");

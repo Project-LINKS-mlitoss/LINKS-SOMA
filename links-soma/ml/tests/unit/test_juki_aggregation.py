@@ -16,6 +16,7 @@ import pytest
 from preprocessing.record_linkage.juki import (
     _to_num,
     filter_settled_before_cutoff,
+    filter_single_household_addresses,
     calculate_household_size,
     calculate_event_counts,
     calculate_age_stats,
@@ -1011,9 +1012,7 @@ class TestCombinedScenarios:
     def test_two_households_at_same_address(self):
         """Two different household_codes at the same address.
 
-        HH_A: 2 people, 0 departed → size 2
-        HH_B: 3 people, 1 departed → size 2
-        Total household_size for address = 4
+        1 住所 1 世帯に当たらないため、住所ごと集計対象から外れる。
         """
         cutoff_date = pd.Timestamp("2024-01-01")
         records = [
@@ -1038,8 +1037,8 @@ class TestCombinedScenarios:
         df = _make_juki_df(records)
         result = aggregate_juki(df, standard_date=cutoff_date)
 
-        addr = "テスト県二世帯市共住町"
-        assert result.loc[addr, "household_size_juki_residence"] == 4
+        assert "テスト県二世帯市共住町" not in result.index
+        assert len(result) == 0
 
     def test_only_future_residents(self):
         """All people have 住定日 > cutoff → address should NOT appear
@@ -1061,3 +1060,241 @@ class TestCombinedScenarios:
         assert len(settled) == 0
         hh_size = calculate_household_size(settled, 20240101)
         assert len(hh_size) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tests for filter_single_household_addresses
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestFilterSingleHouseholdAddresses:
+    """集計対象を 1 住所 1 世帯のレコードに限定する。"""
+
+    def test_single_household_kept(self):
+        """1 住所 1 世帯なら、複数人でも残る。"""
+        df = _make_juki_df([
+            {"household_code": "HH_ONE", "address": "テスト県単世帯市A町"},
+            {"household_code": "HH_ONE", "address": "テスト県単世帯市A町"},
+        ])
+        assert len(filter_single_household_addresses(df)) == 2
+
+    def test_multiple_codes_at_one_address_excluded(self):
+        """同一住所に世帯番号が 2 つあると、その住所のレコードが全て外れる。"""
+        df = _make_juki_df([
+            {"household_code": "HH_X", "address": "テスト県混在市B町"},
+            {"household_code": "HH_Y", "address": "テスト県混在市B町"},
+            {"household_code": "HH_Z", "address": "テスト県単独市C町"},
+        ])
+        result = filter_single_household_addresses(df)
+        assert list(result["normalized_address"]) == ["テスト県単独市C町"]
+
+    def test_one_code_at_multiple_addresses_excluded(self):
+        """同一世帯番号が 2 住所に現れると、その世帯のレコードが全て外れる。"""
+        df = _make_juki_df([
+            {"household_code": "HH_MOVE", "address": "テスト県転居市D町"},
+            {"household_code": "HH_MOVE", "address": "テスト県転居市E町"},
+            {"household_code": "HH_STAY", "address": "テスト県定住市F町"},
+        ])
+        result = filter_single_household_addresses(df)
+        assert list(result["normalized_address"]) == ["テスト県定住市F町"]
+
+    def test_null_code_row_at_excluded_address_dropped(self):
+        """対象外の住所に世帯番号なしの行が混ざっていても、住所ごと外れる。"""
+        df = _make_juki_df([
+            {"household_code": "HH_P", "address": "テスト県欠損市G町"},
+            {"household_code": "HH_Q", "address": "テスト県欠損市G町"},
+            {"household_code": "HH_NULL", "address": "テスト県欠損市G町"},
+            {"household_code": "HH_R", "address": "テスト県欠損市H町"},
+        ])
+        df.loc[2, "household_code"] = np.nan
+        result = filter_single_household_addresses(df)
+        assert list(result["normalized_address"]) == ["テスト県欠損市H町"]
+
+    def test_blank_address_not_counted_as_another_address(self):
+        """住所が入力されていない行は、住所の種類として数えない。
+
+        normalize_series は空欄・None・NaN をそれぞれ別文字列にするため、
+        これを住所として数えると同一世帯が複数住所にまたがる扱いになる。
+        """
+        df = _make_juki_df([
+            {"household_code": "HH_B1", "address": "テスト県空欄市R町"},
+            {"household_code": "HH_B1", "address": "テスト県空欄市R町"},
+            {"household_code": "HH_B1", "address": ""},
+            {"household_code": "HH_B1", "address": "None"},
+            {"household_code": "HH_B1", "address": "nan"},
+        ])
+        result = filter_single_household_addresses(df)
+        assert len(result) == 5
+
+    def test_whitespace_only_difference_is_same_household(self):
+        """前後の空白だけが違う世帯番号は、同一世帯として扱う。"""
+        df = _make_juki_df([
+            {"household_code": "H001", "address": "テスト県空白市W町"},
+            {"household_code": "H001 ", "address": "テスト県空白市W町"},
+            {"household_code": " H001", "address": "テスト県空白市W町"},
+        ])
+        assert len(filter_single_household_addresses(df)) == 3
+
+    def test_blank_code_not_treated_as_a_household(self):
+        """空白だけの世帯番号は未入力として扱い、1つの世帯に束ねない。"""
+        df = _make_juki_df([
+            {"household_code": " ", "address": "テスト県空番市X町"},
+            {"household_code": "  ", "address": "テスト県空番市Y町"},
+            {"household_code": "H9", "address": "テスト県空番市Z町"},
+        ])
+        assert len(filter_single_household_addresses(df)) == 3
+
+    def test_missing_address_column_keeps_everything(self):
+        """住所カラムが無い入力でも例外にせず全件残す。"""
+        df = _make_juki_df([
+            {"household_code": "H1", "address": "テスト県無住所市A町"},
+        ]).drop(columns=["normalized_address"])
+        assert len(filter_single_household_addresses(df)) == 1
+
+    def test_judged_df_limits_the_population(self):
+        """judged_df に含まれないレコードは世帯数として数えない。"""
+        df = _make_juki_df([
+            {"household_code": "HH_J1", "address": "テスト県母集団市S町"},
+            {"household_code": "HH_J2", "address": "テスト県母集団市S町"},
+        ])
+        judged = df.iloc[[0]]
+        assert len(filter_single_household_addresses(df, judged_df=judged)) == 2
+        assert len(filter_single_household_addresses(df)) == 0
+
+    def test_all_codes_null_keeps_everything(self):
+        """世帯番号が全て欠損なら重複を判定できないため、全件残す。"""
+        df = _make_juki_df([
+            {"address": "テスト県無番市I町"},
+            {"address": "テスト県無番市I町"},
+        ])
+        df["household_code"] = np.nan
+        assert len(filter_single_household_addresses(df)) == 2
+
+    def test_missing_code_column_keeps_everything(self):
+        """世帯番号カラム自体が無い入力でも例外にせず全件残す。"""
+        df = _make_juki_df([
+            {"address": "テスト県無列市J町"},
+            {"address": "テスト県無列市J町"},
+        ]).drop(columns=["household_code"])
+        assert len(filter_single_household_addresses(df)) == 2
+
+
+class TestAggregateJukiSingleHouseholdLimit:
+    """aggregate_juki が 1 住所 1 世帯の限定を適用する。"""
+
+    STD = pd.Timestamp("2024-01-01")
+
+    def test_mixed_address_excluded_others_kept(self):
+        """世帯番号が混在する住所だけが消え、他の住所は従来どおり集計される。"""
+        records = [
+            {"household_code": "HH_M1", "address": "テスト県混在市K町",
+             "birth_date": "19500101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_M2", "address": "テスト県混在市K町",
+             "birth_date": "19600101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_S1", "address": "テスト県健全市L町",
+             "birth_date": "19700101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_S1", "address": "テスト県健全市L町",
+             "birth_date": "19750101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+
+        assert "テスト県混在市K町" not in result.index
+        assert result.loc["テスト県健全市L町", "household_size_juki_residence"] == 2
+
+    def test_relocated_household_excluded_from_both_addresses(self):
+        """同一世帯番号が 2 住所にあると、両方の住所が集計に出ない。"""
+        records = [
+            {"household_code": "HH_MV", "address": "テスト県転居市M町",
+             "birth_date": "19500101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_MV", "address": "テスト県転居市N町",
+             "birth_date": "19500101", "move_date": "20100101",
+             "date_transfer": "20100101", "reason_transfer": "転入"},
+            {"household_code": "HH_FX", "address": "テスト県定住市O町",
+             "birth_date": "19700101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+
+        assert "テスト県転居市M町" not in result.index
+        assert "テスト県転居市N町" not in result.index
+        assert result.loc["テスト県定住市O町", "household_size_juki_residence"] == 1
+
+    def test_all_records_excluded_returns_empty(self):
+        """全レコードが対象外でも例外にせず空の集計結果を返す。"""
+        records = [
+            {"household_code": "HH_E1", "address": "テスト県全除外市P町",
+             "birth_date": "19500101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_E2", "address": "テスト県全除外市P町",
+             "birth_date": "19600101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+        assert len(result) == 0
+        # match_juki_to_water が reset_index() で住所列を復元できる必要がある
+        assert result.index.name == "normalized_address"
+
+    def test_future_settlement_not_counted_as_second_household(self):
+        """基準日より後に住定する世帯は、基準日時点の世帯数に数えない。"""
+        records = [
+            {"household_code": "HH_NOW", "address": "テスト県未来市T町",
+             "birth_date": "19700101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_NOW", "address": "テスト県未来市T町",
+             "birth_date": "19750101", "move_date": "20000101",
+             "date_transfer": "20000101", "reason_transfer": "転入"},
+            {"household_code": "HH_LATER", "address": "テスト県未来市T町",
+             "birth_date": "19900101", "move_date": "20300101",
+             "date_transfer": "20300101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+
+        assert result.loc["テスト県未来市T町", "household_size_juki_residence"] == 2
+
+    def test_departed_household_not_counted_as_second_household(self):
+        """基準日より前に転出した世帯は、基準日時点の世帯数に数えない。"""
+        records = [
+            {"household_code": "HH_GONE", "address": "テスト県入替市U町",
+             "birth_date": "19500101", "move_date": "19900101",
+             "date_transfer": "20100101", "reason_transfer": "転出"},
+            {"household_code": "HH_HERE", "address": "テスト県入替市U町",
+             "birth_date": "19800101", "move_date": "20150101",
+             "date_transfer": "20150101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+
+        assert "テスト県入替市U町" in result.index
+        assert result.loc["テスト県入替市U町", "household_size_juki_residence"] == 1
+
+    def test_two_households_both_present_still_excluded(self):
+        """基準日時点で 2 世帯とも在住していれば、従来どおり対象外になる。"""
+        records = [
+            {"household_code": "HH_P1", "address": "テスト県同居市V町",
+             "birth_date": "19500101", "move_date": "19900101",
+             "date_transfer": "19900101", "reason_transfer": "転入"},
+            {"household_code": "HH_P2", "address": "テスト県同居市V町",
+             "birth_date": "19800101", "move_date": "20150101",
+             "date_transfer": "20150101", "reason_transfer": "転入"},
+        ]
+        result = aggregate_juki(_make_juki_df(records), standard_date=self.STD)
+
+        assert "テスト県同居市V町" not in result.index
+
+    def test_without_household_code_behaves_as_before(self):
+        """世帯番号が無い入力では限定が効かず、住所単位の集計が従来どおり動く。"""
+        records = [
+            {"address": "テスト県無番市Q町", "birth_date": "19500101",
+             "move_date": "20000101", "date_transfer": "20000101",
+             "reason_transfer": "転入"},
+            {"address": "テスト県無番市Q町", "birth_date": "19600101",
+             "move_date": "20000101", "date_transfer": "20000101",
+             "reason_transfer": "転入"},
+        ]
+        df = _make_juki_df(records)
+        df["household_code"] = np.nan
+        result = aggregate_juki(df, standard_date=self.STD)
+        assert result.loc["テスト県無番市Q町", "household_size_juki_residence"] == 2

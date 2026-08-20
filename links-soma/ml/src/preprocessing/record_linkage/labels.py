@@ -234,10 +234,14 @@ _LABEL_LOADERS = {
 }
 
 
-def assign_labels(city: str, city_cfg: dict, data_dir: Path, df: pd.DataFrame) -> pd.DataFrame:
+def assign_labels(city: str, city_cfg: dict, data_dir: Path, df: pd.DataFrame, stats: dict | None = None) -> pd.DataFrame:
     """Load vacancy labels for a city and join to df by normalized address.
 
     Adds columns: is_vacant, vacant_type, vacant_source, vacant_year.
+
+    stats: 非Noneのとき結合率算出用の統計を書き込む。
+        sub_rows=空き家調査結果の一意住所数（分母）、matched=水道住所に一致した数（分子）。
+        ラベルが無い場合（ローダー無し・ファイル無し）は書き込まない。
 
     Address matching strategy:
       1. Normalize label addresses.
@@ -297,6 +301,11 @@ def assign_labels(city: str, city_cfg: dict, data_dir: Path, df: pd.DataFrame) -
     print(f"  [labels] Match rate (no strip):        {rate_nostrip:.1%}")
 
     idx = idx_strip if rate_strip >= rate_nostrip else idx_nostrip
+
+    # 結合率統計: マッチ先（空き家調査結果側）の一意住所を分母にする
+    if stats is not None:
+        stats["sub_rows"] = int(len(idx))
+        stats["matched"]  = int(len(set(idx.index) & water_addrs))
 
     # Join
     df["is_vacant"]     = df["normalized_address"].isin(idx.index).astype(int)

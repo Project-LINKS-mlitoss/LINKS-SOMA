@@ -4,6 +4,8 @@ Aggregates per-person snapshot records into current household state per address.
 
 Key design principles (2026-03-26 rewrite):
   - Data is snapshot-type: each record represents ONE person
+  - Aggregation targets records forming one household per address
+    (see filter_single_household_addresses)
   - Group by (household_code, address) → then aggregate to address level
   - household_size_juki_residence = people settled before cutoff
     MINUS people who departed (転出/死亡) before cutoff
@@ -20,6 +22,11 @@ import numpy as np
 import pandas as pd
 
 from src.preprocessing.address_utils import CleanData
+from src.preprocessing.date_normalize import normalize_date_series
+from src.preprocessing.import_validation import (
+    ensure_required_columns,
+    read_csv_checked,
+)
 
 
 N_TRANSFER_SLOTS = 11  # max pivoted transfer-event columns per address
@@ -29,6 +36,9 @@ _REF_YEAR = 2024
 
 # Departure reasons used for household size subtraction
 _DEPARTURE_REASONS = ("転出", "死亡")
+
+# 住所未入力を正規化した結果。CleanData.normalize_series が空欄・None・NaN を返す形。
+_BLANK_ADDRESSES = ("", "None", "nan")
 
 
 def _slash_date_to_yyyymmdd(val) -> str | float:
@@ -54,8 +64,10 @@ def load_juki(city_cfg: dict, data_dir: Path) -> pd.DataFrame:
     src_col = {v: k for k, v in cols.items() if v is not None}
     date_fmt = cfg.get("date_format")
 
-    df = pd.read_csv(data_dir / cfg["file"], low_memory=False, dtype=str)
+    df = read_csv_checked(data_dir / cfg["file"], low_memory=False, dtype=str)
     df = df.rename(columns=src_col)
+    # 必須カラム未指定(E-101): 以降の無条件アクセス前に検査して明示停止する
+    ensure_required_columns(df.columns, "juki")
 
     if "address_suffix" in df.columns:
         df["address"] = df["address"].fillna("") + df["address_suffix"].fillna("")
@@ -84,34 +96,77 @@ def load_juki(city_cfg: dict, data_dir: Path) -> pd.DataFrame:
     return df
 
 
-def _to_num(series: pd.Series) -> pd.Series:
-    """日付文字列/数値を YYYYMMDD float に変換する。
+def _normalize_household_code(series: pd.Series) -> pd.Series:
+    """世帯番号を比較用に整える。
 
-    対応形式: YYYYMMDD数値, YYYY-MM-DD, YYYY/M/D
+    前後の空白を落とし、空白だけの値は未入力として NaN にする。空白だけの値を残すと
+    それらが 1 つの世帯番号として束ねられ、無関係な住所どうしが同一世帯になる。
     """
-    def _conv(val) -> float:
-        if pd.isna(val):
-            return float("nan")
-        s = str(val).strip()
-        if "-" in s and len(s) == 10:
-            try:
-                dt = pd.Timestamp(s)
-                return float(dt.year * 10000 + dt.month * 100 + dt.day)
-            except Exception:
-                return float("nan")
-        if "/" in s:
-            parts = s.split("/")
-            if len(parts) == 3:
-                try:
-                    y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
-                    return float(y * 10000 + m * 100 + d)
-                except Exception:
-                    return float("nan")
-        try:
-            return float(str(val).strip())
-        except Exception:
-            return float("nan")
-    return series.map(_conv)
+    stripped = series.astype(str).str.strip()
+    return stripped.where(series.notna() & (stripped != ""))
+
+
+def filter_single_household_addresses(
+    df: pd.DataFrame,
+    addr_col: str = "normalized_address",
+    hh_col: str = "household_code",
+    judged_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """集計対象を 1 住所 1 世帯のレコードに限定する。
+
+    住居の利用実態を把握できるのは、住所と世帯が 1 対 1 で対応するレコードに限られる。
+    対応しないケースは 2 世帯住宅・住所表記の誤り・年内の転居などが混在し、実態を判別
+    できないため集計から外す。
+
+      - 同一住所に複数の世帯番号が付与されている場合は、その住所のレコードを外す
+      - 世帯番号が同一で住所が異なる場合は、その世帯番号のレコードを外す
+
+    judged_df は重複を数える母集団。基準日時点で 1 住所 1 世帯かを見るため、呼び出し側は
+    その時点の在住者を渡す。省略時は df 自身で判定する。
+
+    世帯番号または住所のカラムが無い入力では判定できないため、全レコードをそのまま返す。
+    世帯番号が全件未入力の場合も同様。
+    """
+    if hh_col not in df.columns or addr_col not in df.columns:
+        return df
+
+    judged = df if judged_df is None else judged_df
+    judged_code = _normalize_household_code(judged[hh_col])
+    if not judged_code.notna().any():
+        return df
+
+    # 住所が入力されていない行は住所の種類として数えない。normalize_series が
+    # 空欄・None・NaN をそれぞれ別文字列にするため、明示的に除く。
+    has_addr = ~judged[addr_col].isin(_BLANK_ADDRESSES) & judged[addr_col].notna()
+    pairs = pd.DataFrame({
+        addr_col: judged[addr_col], hh_col: judged_code,
+    })[judged_code.notna() & has_addr]
+    codes_per_addr = pairs.groupby(addr_col)[hh_col].nunique()
+    addrs_per_code = pairs.groupby(hh_col)[addr_col].nunique()
+    multi_code_addrs = codes_per_addr[codes_per_addr >= 2].index
+    multi_addr_codes = addrs_per_code[addrs_per_code >= 2].index
+
+    df_code = _normalize_household_code(df[hh_col])
+    excluded = df[addr_col].isin(multi_code_addrs) | (
+        df_code.notna() & df_code.isin(multi_addr_codes)
+    )
+    if not excluded.any():
+        return df
+
+    print(f"  [juki] Excluded {int(excluded.sum()):,} records not forming "
+          f"one household per address "
+          f"(addresses: {len(multi_code_addrs):,}, "
+          f"household codes: {len(multi_addr_codes):,})")
+    return df[~excluded].copy()
+
+
+def _to_num(series: pd.Series) -> pd.Series:
+    """日付文字列/数値を YYYYMMDD float に変換する（不能は NaN）。
+
+    受理形式の単一の真実は date_normalize.normalize_date_series（8桁/区切り/年月日/和暦）。
+    事後バリ DTYPE_DATE も同じ関数で判定するため、本体と検査の受理集合が必ず一致する。
+    """
+    return normalize_date_series(series)
 
 
 def filter_settled_before_cutoff(
@@ -223,6 +278,9 @@ def calculate_event_counts(
         reasons.str.contains("転出", na=False) & before_cutoff
     ).astype(int)
 
+    # 「消除」は死亡消除・転出消除も拾う。本列は表示・出力専用でモデルは読まないため
+    # 影響は表示値に限る。has_cancellation_event（features/juki.py）は「職権消除」で
+    # 照合しており、語が一致しない。
     temp["_is_cancel"] = (
         reasons.str.contains("消除", na=False) & before_cutoff
     ).astype(int)
@@ -252,8 +310,10 @@ def calculate_age_stats(
         )
 
     temp = active_df.copy()
+    # 生年月日は日付（網羅表: 生年月日=日付形式・和暦/西暦）。正準正規化で YYYYMMDD float 化し、
+    # 上位4桁を年として取る。
     temp["_birth_year"] = (
-        pd.to_numeric(temp["birth_date"], errors="coerce")
+        _to_num(temp["birth_date"])
         .floordiv(10000)
         .astype("Int64")
     )
@@ -313,6 +373,7 @@ def aggregate_juki(
     snapshot形式のみ対応（ADR-0016）。デデュプなし・転出のみカウント。
 
     Logic:
+      0. 1 住所 1 世帯のレコードに限定
       1. 住定日 <= 基準日 でフィルタ
       2. household_size = settled_count - departed_count per (household_code, addr)
       3. event counts（住定日 <= 基準日 のレコードのみ）
@@ -336,8 +397,18 @@ def aggregate_juki(
     df["_date_num"] = _to_num(df["date_transfer"])  # 異動日
     df["_move_num"] = _to_num(df["move_date"])       # 住定日
 
-    # ── 住定日 <= 基準日 でフィルタ ────────────────────────────────
+    # ── 1 住所 1 世帯のレコードに限定 ──────────────────────────────
+    # 判定は基準日時点の在住者で行う。基準日より後に住定した人と、転出・死亡済みの人は
+    # 基準日時点の世帯として数えない。
     settled = filter_settled_before_cutoff(df, cutoff, "_move_num")
+    kept = filter_single_household_addresses(
+        df, addr_col, judged_df=_get_active_residents(settled, cutoff)
+    )
+    if len(kept) != len(df):
+        df = kept
+        settled = filter_settled_before_cutoff(df, cutoff, "_move_num")
+
+    # ── 住定日 <= 基準日 の除外件数 ────────────────────────────────
     n_excluded = len(df) - len(settled)
     if n_excluded > 0:
         print(f"  [juki] Excluded {n_excluded:,} records with 住定日 > {cutoff} "
@@ -385,6 +456,8 @@ def aggregate_juki(
         .join(res_dur, how="left")
     )
     combined["juki_residence_flag"] = 1
+    # 集計対象が0件のとき、空の Series 由来で index 名が失われる
+    combined.index.name = addr_col
 
     # ── Pivot: 最新N件のイベントをカラム展開 ──────────────────────
     if cutoff < 99_999_999:
@@ -407,7 +480,10 @@ def aggregate_juki(
             row[f"move_date_{i}_juki_residence"] = ev.get("move_date")
         pivot_rows.append(row)
 
-    pivot_df = pd.DataFrame(pivot_rows).set_index("normalized_address")
+    # 全レコードが対象外なら pivot_rows は空になり、列が作られないため明示する
+    pivot_df = pd.DataFrame(
+        pivot_rows, columns=None if pivot_rows else ["normalized_address"]
+    ).set_index("normalized_address")
 
     agg = combined.join(pivot_df, how="left")
     print(f"  [juki] Aggregated {len(agg):,} unique addresses")

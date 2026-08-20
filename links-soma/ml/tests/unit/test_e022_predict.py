@@ -9,7 +9,74 @@ import pandas as pd
 import pytest
 from sklearn.linear_model import LogisticRegression
 
+import E022
 from E022 import predict_akiya
+from constants import (
+    ERROR_20001,
+    ERROR_20002,
+    ERROR_20003,
+    ERROR_20005,
+    ERROR_20006,
+)
+
+
+class TestReadCsvErrorCode:
+    """read_csv の失敗時に推定の入力エラーコード(R-052/053/054)が設定されること"""
+
+    def test_存在しないファイルはE20003を設定する(self, tmp_path):
+        E022.ERROR_CODE = None
+        with pytest.raises(FileNotFoundError):
+            E022.read_csv(str(tmp_path / "missing.csv"))
+        assert E022.ERROR_CODE == ERROR_20003["code"]
+
+    def test_非CSVファイルはE20001を設定する(self, tmp_path):
+        path = tmp_path / "data.txt"
+        path.write_text("x")
+        E022.ERROR_CODE = None
+        with pytest.raises(ValueError):
+            E022.read_csv(str(path))
+        assert E022.ERROR_CODE == ERROR_20001["code"]
+
+    def test_文字コード検出不能はE20002を設定する(self, tmp_path):
+        # 空ファイルは chardet が encoding=None を返し detect_encoding が ValueError を送出する
+        path = tmp_path / "empty.csv"
+        path.write_bytes(b"")
+        E022.ERROR_CODE = None
+        with pytest.raises(IOError):
+            E022.read_csv(str(path))
+        assert E022.ERROR_CODE == ERROR_20002["code"]
+
+
+class TestSaveCsvEncodingFallback:
+    """R-056/057: 予測結果CSVの保存をエンコーディングフォールバックで行い、失敗を採番する"""
+
+    def test_正常時はutf8sigで保存しエラーを解除する(self, tmp_path):
+        E022.ERROR_CODE = "stale"  # 直前の失敗が残っていても成功で解除されること
+        E022.ERROR_MSG = "stale"
+        df = pd.DataFrame({"a": [1, 2], "名前": ["甲", "乙"]})
+        path = str(tmp_path / "out.csv")
+
+        used = E022.save_csv_with_encoding_fallback(df, path)
+
+        assert used == "utf-8-sig"
+        assert E022.ERROR_CODE is None
+        roundtrip = pd.read_csv(path, encoding="utf-8-sig")
+        assert list(roundtrip["名前"]) == ["甲", "乙"]
+
+    def test_全エンコーディングで保存失敗ならE20006を設定し送出する(self, tmp_path):
+        # 存在しないディレクトリ配下のパスはどのエンコーディングでも書けない
+        df = pd.DataFrame({"a": [1]})
+        bad_path = str(tmp_path / "no_such_dir" / "out.csv")
+        E022.ERROR_CODE = None
+
+        with pytest.raises(IOError):
+            E022.save_csv_with_encoding_fallback(df, bad_path)
+
+        # 全滅後に最後に設定されるのは R-057(E-20006)
+        assert E022.ERROR_CODE == ERROR_20006["code"]
+        assert ERROR_20006["code"] == "IF003_e022_err_export_path"
+        # 途中で R-056(E-20005) のメッセージ整形も行われる（コード定義の健全性）
+        assert ERROR_20005["code"] == "IF003_e022_err_export_encoding"
 
 
 def _make_pu_bagging_model(n_models=3, n_features=2):

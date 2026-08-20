@@ -27,6 +27,8 @@ type Props = {
   labelRegister: Record<string, unknown>;
   operationRegister: Record<string, unknown>;
   handleRemove: () => void;
+  /** 優先順位の表示と並べ替え操作。行の先頭に配置する */
+  priority: JSX.Element;
 };
 
 export const FieldBoolean = ({
@@ -34,12 +36,14 @@ export const FieldBoolean = ({
   labelRegister,
   operationRegister,
   handleRemove,
+  priority,
 }: Props): JSX.Element => {
   const styles = useStyles();
   if (field.value.referenceColumnType !== "boolean") return <></>;
 
   return (
     <Field className={styles.groupField}>
+      {priority}
       <Input
         className={styles.inputLabelValue}
         defaultValue={field.value.label}

@@ -16,11 +16,23 @@ export const createNormalizedDatasets = (async (
   { insertParams: { file_path, file_name, job_results_id }, jobId }: Params,
 ): Promise<void> => {
   db.transaction((tx) => {
+    // 目的はジョブパラメータ（名寄せ設定）を単一ソースとして引き継ぐ。
+    const job = tx
+      .select({ parameters: jobs.parameters })
+      .from(jobs)
+      .where(eq(jobs.id, jobId))
+      .get();
+    const purpose =
+      job?.parameters.parameterType === "preprocess"
+        ? job.parameters.settings.purpose
+        : null;
+
     tx.insert(normalized_data_sets)
       .values({
         file_name,
         file_path,
         job_results_id,
+        purpose,
       })
       .run();
     tx.update(jobs)

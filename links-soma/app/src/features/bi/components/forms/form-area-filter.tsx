@@ -47,6 +47,15 @@ const useStyles = makeStyles({
     lineHeight: "32px",
     fontSize: "12px",
   },
+  emptyState: {
+    minHeight: "120px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    textAlign: "center",
+    fontSize: "12px",
+    padding: "0 16px",
+  },
 });
 
 // コンポーネントを遅延評価で読み込むことでパフォーマンスに配慮
@@ -105,12 +114,16 @@ const useHandleAreas = ({
     setSearchText(e.target.value);
   };
 
-  // 選択した値を更新する。特に集計単位の変更時にダイアログの値をリセットするため
+  // 選択した値を更新する。特に集計単位の変更時にダイアログの値をリセットするため。
+  // 依存は値(areasKey)で比較する。identity で見ると、地域未選択時の `?? []` が
+  // 親の再レンダーごとに新しい配列になり、選択途中のチェックを巻き戻してしまう
+  const areasKey = JSON.stringify(areas);
   useEffect(
     function updateAreas() {
       setSelectedAreas(areas);
     },
-    [areas],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- areas は areasKey で値比較する
+    [areasKey],
   );
 
   return {
@@ -160,6 +173,9 @@ export const FormAreaFilter = (props: Props): JSX.Element => {
 
   const styles = useStyles();
 
+  // 取得完了かつ地域候補ゼロ（推定時に地域集計用データ未設定など）
+  const hasNoAreaData = data !== undefined && data.length === 0;
+
   return (
     <Field label="地域">
       <div className={styles.layout}>
@@ -208,18 +224,25 @@ export const FormAreaFilter = (props: Props): JSX.Element => {
               地域を選択
             </DialogTitle>
             <DialogContent border>
-              <Suspense fallback={<Spinner />}>
-                <AreaFilterFormOptions
-                  dataSetResultId={props.dataSetResultId}
-                  onChange={setSelectedAreas}
-                  searchFilteredData={searchFilteredData}
-                  selectedAreas={selectedAreas}
-                  unit={props.unit}
-                />
-              </Suspense>
+              {hasNoAreaData ? (
+                // 空のチェックボックス群でなく理由を示す
+                <p className={styles.emptyState}>
+                  地域データがありません。推定時に地域集計用データを設定すると、地域で絞り込めます。
+                </p>
+              ) : (
+                <Suspense fallback={<Spinner />}>
+                  <AreaFilterFormOptions
+                    dataSetResultId={props.dataSetResultId}
+                    onChange={setSelectedAreas}
+                    searchFilteredData={searchFilteredData}
+                    selectedAreas={selectedAreas}
+                    unit={props.unit}
+                  />
+                </Suspense>
+              )}
             </DialogContent>
             <DialogActions>
-              {isAllCleared && (
+              {!hasNoAreaData && isAllCleared && (
                 <Button
                   appearance="outline"
                   disabled={data === undefined}
@@ -228,7 +251,7 @@ export const FormAreaFilter = (props: Props): JSX.Element => {
                   すべて選択
                 </Button>
               )}
-              {!isAllCleared && (
+              {!hasNoAreaData && !isAllCleared && (
                 <Button appearance="outline" onClick={handleAllClear}>
                   すべてクリア
                 </Button>

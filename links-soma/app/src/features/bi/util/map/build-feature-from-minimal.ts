@@ -1,27 +1,13 @@
 import { wktToGeoJSON } from "betterknown";
 import { type FeatureData } from "../../types";
+import { type MinimalBuildingData } from "../../ipc/select-buildings/select-buildings-viewport-chunk";
+
+export { type MinimalBuildingData };
 
 /**
- * 地図表示用の最小限のデータ型（IPCハンドラーと同じ定義）
+ * 最小限プロパティ型。地図に載せる値は取得元と同一で、順序だけが違う
  */
-export type MinimalBuildingData = {
-  id: number;
-  bldg_geometry: string | null;
-  predicted_probability: number | null;
-  lat_geocoding: number | null;
-  lon_geocoding: number | null;
-};
-
-/**
- * 最小限プロパティ型
- */
-export type MinimalBuildingProperties = {
-  id: number;
-  predicted_probability: number | null;
-  bldg_geometry: string | null;
-  lat_geocoding: number | null;
-  lon_geocoding: number | null;
-};
+export type MinimalBuildingProperties = MinimalBuildingData;
 
 /**
  * 最小限の建物データからFeatureDataを構築（レンダラー側でWKT変換）
@@ -40,6 +26,10 @@ export const buildFeatureFromMinimal = (
     properties: {
       id: data.id,
       predicted_probability: data.predicted_probability,
+      predicted_probability_change_rate_from_oldest:
+        data.predicted_probability_change_rate_from_oldest,
+      predicted_probability_change_rate_from_previous:
+        data.predicted_probability_change_rate_from_previous,
       bldg_geometry: data.bldg_geometry,
       lat_geocoding: data.lat_geocoding,
       lon_geocoding: data.lon_geocoding,

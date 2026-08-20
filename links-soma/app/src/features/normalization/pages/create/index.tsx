@@ -6,23 +6,29 @@ import {
 } from "@fluentui/react-components";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Dismiss24Regular } from "@fluentui/react-icons";
-import { Button } from "../../../../shared/components/ui/button";
-import { DialogSurface } from "../../../../shared/components/ui/dialog-surface";
-import { DialogBody } from "../../../../shared/components/ui/dialog-body";
-import { DialogTitle } from "../../../../shared/components/ui/dialog-title";
-import { DialogContent } from "../../../../shared/components/ui/dialog-content";
-import { DialogActions } from "../../../../shared/components/ui/dialog-actions";
 import { useDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { useFetchJob } from "../../../job/hooks/use-fetch-job";
 import {
   BreadcrumbBase,
   BreadcrumbItem,
-} from "../../../../shared/components/ui/breadcrumb";
+  Button,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+} from "../../../../shared/components/ui";
 import { ROUTES } from "../../../../shared/config/routes";
+import { lang } from "../../../../shared/config/lang";
+import { ProcessIntro } from "../../../../shared/components/process-intro";
 import {
   type PreprocessParameters,
   type DraftPreprocessParameters,
 } from "../../../../shared/types/job-parameters";
+import {
+  NORMALIZATION_PURPOSES,
+  type NormalizationPurpose,
+} from "../../hooks/use-form-normalization";
 import { WizardContainer } from "./wizard-container";
 import { TOTAL_STEPS } from "./wizard-steps";
 
@@ -30,6 +36,8 @@ const useStyles = makeStyles({
   pageWrapper: {
     display: "flex",
     flexDirection: "column",
+    // 見出し域 / 処理説明 / ウィザード間の余白源（モデル・推定ページの root gap と統一）。
+    gap: tokens.spacingVerticalXXL,
     minHeight: "100vh",
     margin: `-${tokens.spacingVerticalXXL} -${tokens.spacingHorizontalXXL}`,
     padding: `${tokens.spacingVerticalXXL} ${tokens.spacingHorizontalXXL}`,
@@ -71,6 +79,15 @@ export function NormalizationCreate(): JSX.Element {
       : !isNaN(parsedStep)
         ? Math.min(Math.max(0, parsedStep), TOTAL_STEPS - 1)
         : 0;
+
+  // 新規開始時の初期目的（モデル構築画面からの導線 ?purpose=model_training）。
+  // 不正値・未指定は undefined（フォーム既定の空き家推定で開く）。
+  const purposeParam = searchParams.get("purpose");
+  const initialPurpose: NormalizationPurpose | undefined = (
+    NORMALIZATION_PURPOSES as readonly string[]
+  ).includes(purposeParam ?? "")
+    ? (purposeParam as NormalizationPurpose)
+    : undefined;
 
   // 下書きjobかどうかを判定
   const isDraft = job?.status === "draft" && job.type === "preprocess";
@@ -114,6 +131,8 @@ export function NormalizationCreate(): JSX.Element {
         <h2 className={styles.heading}>名寄せ処理</h2>
       </div>
 
+      <ProcessIntro description={lang.components.processIntro.normalization} />
+
       <div className={styles.wizardWrapper}>
         {!isJobLoading ? (
           <WizardContainer
@@ -123,6 +142,7 @@ export function NormalizationCreate(): JSX.Element {
             initialJobId={isDraft ? job?.id : undefined}
             initialJoinCheckJobId={initialJoinCheckJobId}
             initialManuallySkippedSteps={initialManuallySkippedSteps}
+            initialPurpose={initialPurpose}
             initialStep={initialStep}
             isDraft={isDraft}
             preprocessParameters={preprocessParameters}

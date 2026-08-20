@@ -136,6 +136,7 @@ function FormComponent({
         ))}
         <EditResultViewFields
           dataSetResultId={selectedResultView.data_set_result_id}
+          onSave={onSubmit}
         />
         <EditResultViewFilterFields resultView={selectedResultView} />
         <div className={styles.buttonContainer}>

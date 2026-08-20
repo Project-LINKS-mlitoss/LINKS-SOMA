@@ -25,10 +25,13 @@ const useStyles = makeStyles({
 
 type Props = {
   dataSetResultId: SelectResultView["data_set_result_id"];
+  /** 閾値調整の「表示を更新」で値の反映に加えてフォーム保存まで行うためのコールバック。 */
+  onSave?: () => void | Promise<void>;
 };
 
 export const EditResultViewFields = ({
   dataSetResultId,
+  onSave,
 }: Props): JSX.Element => {
   const styles = useStyles();
   const editResultViewFieldsState = useEditResultViewFields({
@@ -69,7 +72,7 @@ export const EditResultViewFields = ({
       <Field label="ビューのタイトル">
         <Input placeholder="選択中のビューのタイトル" {...register("title")} />
       </Field>
-      <ThresholdField dataSetResultId={dataSetResultId} />
+      <ThresholdField dataSetResultId={dataSetResultId} onSave={onSave} />
       <Fieldset>
         <FieldLegend>設定</FieldLegend>
         <Field label="種類">

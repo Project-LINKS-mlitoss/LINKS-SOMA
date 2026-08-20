@@ -99,9 +99,9 @@ test.describe("登記データあり 名寄せ → モデル構築 → 推定", 
 
     expect(finalStatus).toBe("complete");
 
-    // 結合率検証: 住基(juki) + 登記(touki) + ジオコーディング(geo) = 3件想定
+    // 結合率検証: 住基(juki) + 登記(touki) + ジオコーディング(geo) + 空き家調査結果(vacant_house) = 4件想定（#1775）
     await verifyNormalizationJoiningRates(page, {
-      expectedJoinSteps: 3,
+      expectedJoinSteps: 4,
       label: "名寄せ（登記+モデル構築用）",
     });
   });
@@ -189,7 +189,7 @@ test.describe("登記データあり 名寄せ → モデル構築 → 推定", 
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

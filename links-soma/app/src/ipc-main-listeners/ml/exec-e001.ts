@@ -13,6 +13,9 @@ import { startJobProcess } from "./_start-job-process";
  *
  * @param parameters - 名寄せ処理パラメータ
  * @param jobId - 既存の下書きjobId（指定時はそのjobを更新して実行）
+ * @returns 実行対象の jobId（成功時）/ false（開始失敗時）。
+ *   再実行など jobId 未指定時は新規作成した job の id を返すため、呼び出し側が
+ *   ガイドの追跡ジョブ（tutorial_state.draft_job_id）を新 id に追従できる。
  */
 export const execE001 = (async (
   _: unknown,
@@ -23,7 +26,7 @@ export const execE001 = (async (
     parameters: PreprocessParameters;
     jobId?: number;
   },
-): Promise<true | false> => {
+): Promise<number | false> => {
   try {
     const baseParameters = {
       ...parameters,
@@ -88,7 +91,7 @@ export const execE001 = (async (
 
     setupMLProcessHandlers(cp, targetJobId);
 
-    return true;
+    return targetJobId;
   } catch (error) {
     mainProcessLogger.error("execE001 failed", error as Error);
     return false;

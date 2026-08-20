@@ -456,7 +456,7 @@ const parseCsvToMemory = (
             if (skipColumns.has(enKey)) continue;
 
             // 変換できなかった場合（元のキーが返ってきた場合）、未マップカラムとして記録
-            // _odsサフィックスのカラムは説明変数追加用データなので警告不要
+            // _odsサフィックスのカラムは建物関連データなので警告不要
             if (
               enKey === originalKey &&
               !excludeColumns.has(originalKey) &&

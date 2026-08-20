@@ -14,6 +14,7 @@ from utils import (
     create_data_set_results,
     concatenate,
     get_rotating_logger,
+    update_predicted_probability_change_rates,
 )
 
 sys.path.append(
@@ -85,7 +86,8 @@ def main():
             ),
         }
 
-        logs_dir = concatenate(params.get("output_path"), "logs")
+        # ジョブ単位ディレクトリに分離（ジョブ混在・証跡DLのため）
+        logs_dir = concatenate(params.get("output_path"), f"logs/job_{job_id}")
         os.makedirs(logs_dir, exist_ok=True)
         logger = get_rotating_logger(logs_dir, logger_name="IF003")
 
@@ -120,8 +122,16 @@ def main():
         else:
             key_column = "KEY_CODE"
 
-        spatial_file = concatenate(
-            params.get("output_path"), params.get("area_grouping")
+        # area_grouping（地域ポリゴン）は任意入力。未指定なら地域集計(E032)をスキップする。
+        # ジオコーディングを使っていない名寄せデータは建物ジオメトリを持たず（E016 が動かない）、
+        # 地域集計に意味がないため UI 側でも地域集計フォームを出さない（issue #1924）。
+        # spec: IF003-estimation.md（area_grouping.path は No / デフォルト None）
+        area_grouping_path = params.get("area_grouping")
+        run_summarization = bool(area_grouping_path)
+        spatial_file = (
+            concatenate(params.get("output_path"), area_grouping_path)
+            if run_summarization
+            else None
         )
         process = 0
         normalized_dataset_paths = params.get("normalized_dataset_paths", [])
@@ -182,28 +192,48 @@ def main():
 
             create_or_update_job(job_id, (process / 2))
 
-            # E032 timing
-            e032_start = datetime.now()
-            logger.info(f"E032 [{idx+1}/{total}] START: {e032_start.strftime('%Y-%m-%d %H:%M:%S')}")
+            # E032: 地域集計。area_grouping 未指定時はスキップ（地域ポリゴンが無ければ集計できない）
+            if run_summarization:
+                e032_start = datetime.now()
+                logger.info(f"E032 [{idx+1}/{total}] START: {e032_start.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            E032(
-                file_path,
-                spatial_file,
-                output_directory,
-                key_column,
-                str(job_id),
-                params.get("db_path"),
-                process,
-                data_set_result_id,
-                logs_dir,
-            )
+                E032(
+                    file_path,
+                    spatial_file,
+                    output_directory,
+                    key_column,
+                    str(job_id),
+                    params.get("db_path"),
+                    process,
+                    data_set_result_id,
+                    logs_dir,
+                )
 
-            e032_end = datetime.now()
-            e032_duration = (e032_end - e032_start).total_seconds()
-            e032_total_duration += e032_duration
-            logger.info(f"E032 [{idx+1}/{total}] END: {e032_end.strftime('%Y-%m-%d %H:%M:%S')} (Duration: {e032_duration:.2f}s)")
+                e032_end = datetime.now()
+                e032_duration = (e032_end - e032_start).total_seconds()
+                e032_total_duration += e032_duration
+                logger.info(f"E032 [{idx+1}/{total}] END: {e032_end.strftime('%Y-%m-%d %H:%M:%S')} (Duration: {e032_duration:.2f}s)")
+            else:
+                logger.info(f"E032 [{idx+1}/{total}] SKIP: area_grouping 未指定のため地域集計をスキップ")
 
             create_or_update_job(job_id, process)
+
+        # 全年度の建物書き込み完了後、空き家推定確率の年度間変化率(2列)を算出する。
+        # 複数年度(reference_date が複数)の推定結果でのみ意味を持つ後処理。
+        # 主出力(予測・地域集計)はコミット済みのため、失敗しても推定は止めず
+        # エラーを可視化する(変化率は派生・補助情報)。
+        try:
+            updated_rows = update_predicted_probability_change_rates(
+                data_set_result_id
+            )
+            logger.info(
+                f"[change_rate] updated {updated_rows} building rows"
+            )
+        except Exception:
+            logger.error(
+                "update_predicted_probability_change_rates failed:\n%s",
+                traceback.format_exc(),
+            )
 
         # IF003 END and summary
         if003_end = datetime.now()
@@ -216,6 +246,26 @@ def main():
         logger.info(f"  E032 Total: {e032_total_duration:.2f}s ({e032_total_duration/60:.2f}m)")
         logger.info(f"  IF003 TOTAL: {if003_duration:.2f}s ({if003_duration/60:.2f}m)")
         logger.info("=" * 60)
+
+        # 段階別処理時間を job_task に保存（NR007）。
+        # 実行情報セクションの内訳表示・証跡DLで使う。段階キーは TS 側 lang.ts でラベル解決する。
+        if job_id:
+            stages = [{"key": "e022", "durationSec": str(round(e022_total_duration, 2))}]
+            if e032_total_duration:  # 地域集計なしの場合は除外
+                stages.append({"key": "e032", "durationSec": str(round(e032_total_duration, 2))})
+            create_or_update_job_task(
+                job_id,
+                progress_percent="100",
+                preprocess_type="stage_timing",
+                error_code=None,
+                error_msg=None,
+                result=json.dumps({
+                    "taskResultType": "stage_timing",
+                    "stages": stages,
+                    "totalSec": str(round(if003_duration, 2)),
+                }, ensure_ascii=False),
+                is_finish=True,
+            )
 
         create_or_update_job(job_id, "complete")
 

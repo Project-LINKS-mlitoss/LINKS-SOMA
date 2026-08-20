@@ -1,4 +1,5 @@
 import { type SQL, sql } from "drizzle-orm";
+import { SQLiteSyncDialect } from "drizzle-orm/sqlite-core";
 import { type GroupCondition } from "../../types/models/parameter";
 
 const operationToQuery = (
@@ -73,3 +74,52 @@ export const conditionsToCaseQueryBuilder = (
 
   return sql`*, case ${sql.join(conditionSQL, sql.raw(" "))} end`;
 };
+
+if (import.meta.vitest) {
+  const { describe, it, expect } = import.meta.vitest;
+
+  const toSqlText = (conditions: GroupCondition[]): string =>
+    new SQLiteSyncDialect().sqlToQuery(
+      conditionsToCaseQueryBuilder("area_group", conditions),
+    ).sql;
+
+  const containsCondition = (label: string): GroupCondition => ({
+    key: `group_${label}`,
+    type: "group",
+    value: {
+      label,
+      referenceColumnType: "text",
+      operation: "contains",
+      value: label,
+    },
+  });
+
+  describe("グループ条件の優先順位", () => {
+    /**
+     * SQLのCASE式は先頭のWHENから評価し、最初に真になった分岐で確定する。
+     * つまり条件配列の順序がそのまま優先順位になり、画面で上にある条件が優先される。
+     * 「東町を含む」は「南東町」にも一致するため、この順序が集計結果を決める。
+     */
+    it("条件配列の順序どおりにWHENを並べる", () => {
+      const sqlText = toSqlText([
+        containsCondition("東町"),
+        containsCondition("南東町"),
+      ]);
+
+      expect(sqlText).toContain(
+        "when area_group like '%東町%' then '東町' when area_group like '%南東町%' then '南東町'",
+      );
+    });
+
+    it("条件を逆順で渡すとWHENの並びも逆になる", () => {
+      const sqlText = toSqlText([
+        containsCondition("南東町"),
+        containsCondition("東町"),
+      ]);
+
+      expect(sqlText).toContain(
+        "when area_group like '%南東町%' then '南東町' when area_group like '%東町%' then '東町'",
+      );
+    });
+  });
+}

@@ -23,6 +23,7 @@ import os
 import sys
 import zipfile
 import traceback
+from datetime import datetime
 from pathlib import Path
 
 import joblib
@@ -51,6 +52,17 @@ except ImportError:
         get_rotating_logger,
     )
     from async_tasks.constants import *
+
+try:
+    from src.preprocessing.import_validation import (
+        FeatureTypeMismatchError,
+        find_non_numeric_feature_columns,
+    )
+except ImportError:
+    from preprocessing.import_validation import (
+        FeatureTypeMismatchError,
+        find_non_numeric_feature_columns,
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -395,6 +407,7 @@ def train_and_evaluate(
     logs_dir = os.path.join(os.path.dirname(output_path), "logs")
     logger = get_rotating_logger(logs_dir, logger_name="E021")
     task_id = None
+    e021_start = datetime.now()  # NR007: モデル構築処理全体の計測起点
 
     try:
         # ── Progress tracking ────────────────────────────────────────────
@@ -458,6 +471,13 @@ def train_and_evaluate(
             )
         logger.info(f"[resolve_features] Features resolved: {len(feat_cols)} / {len(explanatory_variables)} requested")
         logger.info(f"[resolve_features] Columns: {feat_cols}")
+
+        # FR004-007: 説明変数の型不一致(E-201)を _prepare_features の .to_numpy(dtype=float) が
+        # 不透明にクラッシュする前に検出し、どの列が非数値かを添えて明示停止する（責任分界=自治体修正）。
+        bad_feature_cols = find_non_numeric_feature_columns(df, feat_cols)
+        if bad_feature_cols:
+            logger.error(f"[validate_features] Non-numeric feature columns: {bad_feature_cols}")
+            raise FeatureTypeMismatchError(bad_feature_cols)
         # Log JP→EN mapping results
         mapped = {v: _JP_TO_EN_FEATURE_MAP[v] for v in explanatory_variables if v in _JP_TO_EN_FEATURE_MAP}
         if mapped:
@@ -527,13 +547,16 @@ def train_and_evaluate(
         def _progress_with_logging(pct):
             update_progress(pct)
 
+        training_start = datetime.now()  # NR007: モデル学習（コア）の計測起点
         models = _train_pu_bags(
             X_train_rebal, y_train_rebal,
             lgb_params, N_BAGS,
             progress_cb=_progress_with_logging,
             logger=logger,
         )
-        logger.info(f"[pu_bagging] Training complete: {len(models)} models")
+        training_sec = (datetime.now() - training_start).total_seconds()
+        logger.info(f"[pu_bagging] Training complete: {len(models)} models "
+                     f"(Duration: {training_sec:.2f}s)")
 
         update_progress(75)
 
@@ -559,6 +582,7 @@ def train_and_evaluate(
             "taskResultType": "model_create",
             **metrics,
             "important_columns": importance,
+            "durationTrainingSec": str(round(training_sec, 2)),
         }
         if task_id:
             create_or_update_job_task(
@@ -631,6 +655,10 @@ def train_and_evaluate(
         update_progress(95)
 
         # Finalize task
+        # NR007: モデル保存まで含めた処理全体の所要時間を確定して記録する
+        total_sec = (datetime.now() - e021_start).total_seconds()
+        task_result["durationTotalSec"] = str(round(total_sec, 2))
+        logger.info(f"[duration] total={total_sec:.2f}s training={training_sec:.2f}s")
         if task_id:
             create_or_update_job_task(
                 job_id, "100", None, None, None,
@@ -638,13 +666,19 @@ def train_and_evaluate(
                 id=task_id, is_finish=True,
             )
 
+    except FeatureTypeMismatchError:
+        # 説明変数の型不一致(E-201)は IF002.main が責任分界つきで記録する。汎用の
+        # model_learning(状況依存)を二重記録しないよう、ここでは素通しする。
+        raise
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"E021 failed: {error_msg}\n{traceback.format_exc()}")
+        # 送出理由を表示用コード付きの文面へ載せる。コードが無いと職員が問い合わせ時に
+        # 該当エラーを指し示せず、表示用コードを鍵にする fix_guide も引き当たらない。
+        error_msg = ERROR_10001["message"].replace("{param_st1}", str(e))
+        logger.error(f"E021 failed: {e}\n{traceback.format_exc()}")
         if task_id:
             create_or_update_job_task(
                 job_id, "", None,
-                "IF002_e021_err_model_learning",
+                ERROR_10001["code"],
                 error_msg,
                 json.dumps({}),
                 id=task_id, is_finish=True,

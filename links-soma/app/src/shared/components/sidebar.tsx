@@ -1,6 +1,11 @@
 import { NavDrawer, NavDrawerBody, NavItem } from "@fluentui/react-nav-preview";
 
-import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
+import {
+  Divider,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from "@fluentui/react-components";
 import {
   ArrowTrendingLinesRegular,
   HomeRegular,
@@ -13,6 +18,7 @@ import {
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { SIDEBAR_WIDTH } from "../config/layout-constants";
+import { TutorialOverlay } from "../tutorial/overlay";
 
 const useStyles = makeStyles({
   navDrawer: {
@@ -56,37 +62,53 @@ const useStyles = makeStyles({
     color: tokens.colorBrandBackground,
     fontWeight: tokens.fontWeightSemibold,
   },
+  /** 処理群と管理群の境界の Divider。濃いブランド背景では既定線色が不可視のため、薄い白系で上書き。 */
+  groupDivider: {
+    // Fluent Divider は既定 flexGrow:1。flex column の NavDrawerBody 内で縦に伸びて
+    // 空白を食うため 0 に固定し、線本来の高さに戻す。
+    flexGrow: 0,
+    marginTop: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalS,
+    "::before": {
+      borderTopColor: "rgba(255, 255, 255, 0.16)",
+    },
+    "::after": {
+      borderTopColor: "rgba(255, 255, 255, 0.16)",
+    },
+  },
 });
 
 /**
  * @ref createHashRouter
  */
+// 処理群（名寄せ → モデル構築 → 空き家推定 → 分析）を処理順に並べ、
+// 続けて管理群（データセット / 処理一覧）。GROUP_BOUNDARY 以降が管理群。
+const GROUP_BOUNDARY = 4;
 const menuItems = [
-  {
-    icon: ArrowTrendingLinesRegular,
-    label: "分析",
-    value: "1",
-    href: "#analysis/workbook",
-  },
   {
     icon: TableSwitchRegular,
     label: "名寄せ処理",
-    value: "2",
+    value: "1",
     href: "#normalization",
   },
   {
     icon: DatabaseRegular,
     label: "モデル構築",
-    value: "3",
+    value: "2",
     href: "#model",
   },
   {
     icon: HomeRegular,
     label: "空き家推定",
-    value: "4",
+    value: "3",
     href: "#evaluation",
   },
-
+  {
+    icon: ArrowTrendingLinesRegular,
+    label: "分析",
+    value: "4",
+    href: "#analysis/workbook",
+  },
   {
     icon: FolderRegular,
     label: "データセット",
@@ -118,51 +140,58 @@ export const Sidebar = (): JSX.Element => {
     }
   }, [pathname, selectedValue]);
 
-  return (
-    <NavDrawer
-      className={styles.navDrawer}
-      defaultSelectedValue="1"
-      onNavItemSelect={(_, data) => setSelectedValue(data.value as string)}
-      open
-      type="inline"
-    >
-      <NavDrawerBody className={styles.navDrawerBody}>
-        {menuItems.map((item) => {
-          const isActive = selectedValue === item.value;
-          return (
-            <NavItem
-              key={item.value}
-              className={mergeClasses(
-                styles.navItem,
-                isActive ? styles.isActive : "",
-              )}
-              href={item.href}
-              value={item.value}
-            >
-              <div className={styles.menuItem}>
-                <item.icon className={styles.icon} />
-                <div className={styles.label}>{item.label}</div>
-              </div>
-            </NavItem>
-          );
-        })}
+  const renderItem = (item: (typeof menuItems)[number]): JSX.Element => {
+    const isActive = selectedValue === item.value;
+    return (
+      <NavItem
+        key={item.value}
+        className={mergeClasses(
+          styles.navItem,
+          isActive ? styles.isActive : "",
+        )}
+        href={item.href}
+        value={item.value}
+      >
+        <div className={styles.menuItem}>
+          <item.icon className={styles.icon} />
+          <div className={styles.label}>{item.label}</div>
+        </div>
+      </NavItem>
+    );
+  };
 
-        <NavItem
-          key="99"
-          className={mergeClasses(
-            styles.navItem,
-            selectedValue === "99" ? styles.isActive : "",
-          )}
-          href="#app-info"
-          style={{ marginTop: "auto" }}
-          value="99"
-        >
-          <div className={styles.menuItem}>
-            <SettingsRegular className={styles.icon} />
-            <div className={styles.label}>アプリ情報</div>
-          </div>
-        </NavItem>
-      </NavDrawerBody>
-    </NavDrawer>
+  return (
+    <>
+      <NavDrawer
+        className={styles.navDrawer}
+        defaultSelectedValue="4"
+        onNavItemSelect={(_, data) => setSelectedValue(data.value as string)}
+        open
+        type="inline"
+      >
+        <NavDrawerBody className={styles.navDrawerBody}>
+          {menuItems.slice(0, GROUP_BOUNDARY).map(renderItem)}
+          <Divider className={styles.groupDivider} />
+          {menuItems.slice(GROUP_BOUNDARY).map(renderItem)}
+
+          <NavItem
+            key="99"
+            className={mergeClasses(
+              styles.navItem,
+              selectedValue === "99" ? styles.isActive : "",
+            )}
+            href="#app-info"
+            style={{ marginTop: "auto" }}
+            value="99"
+          >
+            <div className={styles.menuItem}>
+              <SettingsRegular className={styles.icon} />
+              <div className={styles.label}>アプリ情報</div>
+            </div>
+          </NavItem>
+        </NavDrawerBody>
+      </NavDrawer>
+      <TutorialOverlay />
+    </>
   );
 };

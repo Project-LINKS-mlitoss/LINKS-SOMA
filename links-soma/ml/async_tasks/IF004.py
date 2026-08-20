@@ -61,7 +61,8 @@ def main():
         }
 
         # Setup logger
-        logs_dir = concatenate(params.get('output_path'), "logs")
+        # ジョブ単位ディレクトリに分離（ジョブ混在・証跡DLのため）
+        logs_dir = concatenate(params.get('output_path'), f"logs/job_{job_id}")
         os.makedirs(logs_dir, exist_ok=True)
         logger = get_rotating_logger(logs_dir, logger_name="IF004")
 

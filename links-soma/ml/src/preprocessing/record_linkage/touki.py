@@ -13,6 +13,11 @@ import numpy as np
 import pandas as pd
 
 from src.preprocessing.address_utils import CleanData
+from src.preprocessing.date_normalize import normalize_date_series
+from src.preprocessing.import_validation import (
+    ensure_required_columns,
+    read_csv_checked,
+)
 
 
 def load_touki(city_cfg: dict, data_dir: Path) -> pd.DataFrame | None:
@@ -28,15 +33,19 @@ def load_touki(city_cfg: dict, data_dir: Path) -> pd.DataFrame | None:
     cols    = cfg["columns"]
     src_col = {v: k for k, v in cols.items() if v is not None}
 
-    df = pd.read_csv(data_dir / cfg["file"], low_memory=False, dtype=str)
+    df = read_csv_checked(data_dir / cfg["file"], low_memory=False, dtype=str)
     df = df.rename(columns=src_col)
+    # 必須カラム未指定(E-101): 以降の無条件アクセス前に検査して明示停止する
+    ensure_required_columns(df.columns, "touki")
     keep = [c for c in [
         "address", "registration_reason", "structure", "registration_date",
     ] if c in df.columns]
     df = df[keep].copy()
     df["normalized_address"] = CleanData.normalize_series(df["address"], municipality=city_cfg.get("municipality"))
-    df["registration_date"]  = pd.to_numeric(
-        df.get("registration_date", pd.Series()), errors="coerce"
+    # 登記日付は日付（網羅表: 登記日付=日付形式・西暦/和暦）。正準正規化で YYYYMMDD float 化し、
+    # 数値比較でソートして最新の登記を選択する。
+    df["registration_date"] = normalize_date_series(
+        df.get("registration_date", pd.Series(dtype=object))
     )
     print(f"  [touki] Loaded {len(df):,} events | "
           f"unique addresses: {df['normalized_address'].nunique():,}")

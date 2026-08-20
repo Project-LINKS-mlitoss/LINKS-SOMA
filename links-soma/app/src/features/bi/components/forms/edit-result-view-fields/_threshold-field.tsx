@@ -10,16 +10,22 @@ import { useFetchEstimationThreshold } from "../../../hooks";
 import type { SelectResultView } from "../../../../../db/schema";
 import type { EditViewFormType } from "../../../types/models/form";
 import type { Threshold } from "../../../types/models/parameter";
+import { ThresholdAssistant } from "./threshold-assistant";
 
 type Props = {
   dataSetResultId: SelectResultView["data_set_result_id"];
+  /** 閾値調整の「表示を更新」で、値の反映後にフォーム保存まで行うためのコールバック。 */
+  onSave?: () => void | Promise<void>;
 };
 
 /**
  * 閾値選択フィールド
  * 空き家判定の閾値（5%〜100%）を選択するドロップダウン
  */
-export const ThresholdField = ({ dataSetResultId }: Props): JSX.Element => {
+export const ThresholdField = ({
+  dataSetResultId,
+  onSave,
+}: Props): JSX.Element => {
   const { watch, setValue } = useFormContext<EditViewFormType>();
   const parameters = watch("parameters");
 
@@ -33,10 +39,8 @@ export const ThresholdField = ({ dataSetResultId }: Props): JSX.Element => {
     (p): p is Threshold => p.key === "threshold",
   );
 
-  const handleThresholdChange = (
-    e: React.ChangeEvent<HTMLSelectElement>,
-  ): void => {
-    const newValue = e.target.value;
+  // 閾値値を view パラメータに反映する中核処理。Select と対話的調整アシスタントで共用する。
+  const applyThreshold = (newValue: string): void => {
     const existingParams = parameters ?? [];
 
     if (newValue === "") {
@@ -74,7 +78,7 @@ export const ThresholdField = ({ dataSetResultId }: Props): JSX.Element => {
       <FieldLegend>判定設定</FieldLegend>
       <Field label="空き家判定閾値">
         <Select
-          onChange={handleThresholdChange}
+          onChange={(e) => applyThreshold(e.target.value)}
           value={currentThreshold?.value ?? ""}
         >
           <option value="">
@@ -89,6 +93,15 @@ export const ThresholdField = ({ dataSetResultId }: Props): JSX.Element => {
           ))}
         </Select>
       </Field>
+      {/* 対話的閾値調整（FR022）。境界付近の建物への判断からおすすめ閾値を提案し反映する。
+          「表示を更新」では値の反映に続けてフォーム保存（onSave）まで行う。 */}
+      <ThresholdAssistant
+        dataSetResultId={dataSetResultId}
+        onApply={async (value) => {
+          applyThreshold(value);
+          await onSave?.();
+        }}
+      />
     </Fieldset>
   );
 };

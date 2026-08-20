@@ -30,6 +30,10 @@ export const createDraftJob = (async (
     .get();
 
   if (existingDraft) {
+    // 既存下書きは中身を保持したまま ID を返す（上書きしない）。
+    // 新規開始の導線は名寄せ一覧の下書き確認ダイアログを通り、新規作成時は
+    // 事前に下書きを削除する。よってここに既存下書きが残るのは再開系の経路で、
+    // 上書きすると進行中の入力を失うため行わない。目的は新規作成（下書き不在）時に保存される。
     mainProcessLogger.info(
       `Existing draft job found: ${existingDraft.id}, returning existing`,
     );

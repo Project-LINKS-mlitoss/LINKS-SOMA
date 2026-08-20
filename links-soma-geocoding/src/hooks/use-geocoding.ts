@@ -1,6 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const DEFAULT_BASE_URL = 'https://api-geocode.geospace.jp/api/v1/geocoding/';
+import {
+  PositionLevel,
+  UNKNOWN_POSITION_LEVEL,
+  formatJudgmentValue,
+  positionLevelFromAbr,
+  positionLevelFromAws,
+  positionLevelFromNtt,
+} from '../lib/position-level';
+
+const NTT_BASE_URL = 'https://api-geocode.geospace.jp/api/v1/geocoding/';
+const AWS_GEOCODE_URL = 'https://places.geo.ap-northeast-1.amazonaws.com/v2/geocode';
 
 export type ApiType = 'aws' | 'zenrin' | 'ntt' | 'abr';
 
@@ -16,14 +26,14 @@ export interface FormValues {
 export interface GeocodingResult {
   lat: number;
   lon: number;
+  /** ジオコーダが解釈した住所。CSVの「ジオコーディング住所」列になる。 */
   label: string;
   success: boolean;
   errorMessage?: string;
-  // ABR specific fields
-  score?: number;
-  matchLevel?: string;
-  coordinateLevel?: string;
-  rsdtAddrFlg?: number;
+  /** 緯度経度が示す住所階層。CSVの「位置レベル」列になる。 */
+  positionLevel: PositionLevel;
+  /** 位置レベルの変換元となったジオコーダ固有値。CSVの「判定値」列になる。 */
+  judgmentValue: string;
 }
 
 export interface RunResultSummary {
@@ -33,16 +43,47 @@ export interface RunResultSummary {
   results: GeocodingResult[];
 }
 
+/** 有限な数値のみを返す。null / undefined / NaN / 数値化できない文字列は undefined。 */
+function toFiniteNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(num) ? num : undefined;
+}
+
+export function failedResult(errorMessage: string): GeocodingResult {
+  return {
+    lat: 0,
+    lon: 0,
+    label: '',
+    success: false,
+    errorMessage,
+    positionLevel: UNKNOWN_POSITION_LEVEL,
+    judgmentValue: '',
+  };
+}
+
+/**
+ * AWS Places API v2 の Geocode オペレーション。
+ * PlaceType が位置レベルの判定値になる。旧 SearchPlaceIndexForText の
+ * レスポンスには粒度を示すフィールドが無い。
+ */
 async function geocodeAddressWithAWS(
   address: string,
   apiKey: string
 ): Promise<GeocodingResult> {
   try {
-    const endpoint = `https://places.geo.ap-northeast-1.amazonaws.com/places/v0/indexes/ProjectLINKS_Veda/search/text?key=${encodeURIComponent(
-      apiKey
-    )}`;
+    const endpoint = `${AWS_GEOCODE_URL}?key=${encodeURIComponent(apiKey)}`;
 
-    const payload = { Text: address };
+    const payload = {
+      QueryText: address,
+      Language: 'ja',
+      MaxResults: 1,
+      Filter: { IncludeCountries: ['JPN'] },
+      // 結果をCSVへ出力し永続保存するため、AWS の利用規約は Stored を要求する。
+      // 課金バケットは Stored（東京リージョンで 1,000件あたり $4.00）。
+      // https://docs.aws.amazon.com/location/latest/developerguide/places-pricing.html
+      IntendedUse: 'Storage',
+    };
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -51,54 +92,38 @@ async function geocodeAddressWithAWS(
     });
 
     if (!response.ok) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: `HTTP error ${response.status}`,
-      };
+      // エラー時は {"Message": "..."} を返す。原因が分かるよう本文を残す。
+      const detail = await response
+        .json()
+        .then((body: any) => body?.Message ?? body?.message)
+        .catch(() => undefined);
+      return failedResult(
+        detail ? `${detail} (HTTP ${response.status})` : `HTTP error ${response.status}`
+      );
     }
 
     const data = await response.json();
-    if (!data.Results || data.Results.length === 0) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: '該当する住所が見つかりませんでした',
-      };
+    const item = data.ResultItems?.[0];
+    if (!item) {
+      return failedResult('該当する住所が見つかりませんでした');
     }
 
-    const place = data.Results[0].Place;
-    if (!place || !place.Geometry || !place.Geometry.Point) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: 'レスポンスから座標情報を抽出できませんでした',
-      };
+    if (!Array.isArray(item.Position) || item.Position.length < 2) {
+      return failedResult('レスポンスから座標情報を抽出できませんでした');
     }
 
-    const [lon, lat] = place.Geometry.Point;
-    const label = place.Label || address;
+    const [lon, lat] = item.Position;
 
     return {
       lat,
       lon,
-      label,
+      label: item.Address?.Label || item.Title || address,
       success: true,
+      positionLevel: positionLevelFromAws(item.PlaceType),
+      judgmentValue: formatJudgmentValue('AWS', item.PlaceType),
     };
   } catch (error: any) {
-    return {
-      lat: 0,
-      lon: 0,
-      label: '',
-      success: false,
-      errorMessage: error.message,
-    };
+    return failedResult(error.message);
   }
 }
 
@@ -164,12 +189,17 @@ async function fetchWithRetries(
   throw new Error('Unknown error in fetchWithRetries');
 }
 
+/**
+ * NTT GEOSPACE ジオコーディングAPI。
+ * level（1:都道府県 2:市区町村 3:大字 4:字 5:番地 6:号 7:枝番）が位置レベルの判定値になる。
+ * status は success / zero results / error の3値を取り、HTTPステータスは常に 200。
+ */
 async function geocodeAddressWithNTT(
   address: string,
   appid: string
 ): Promise<GeocodingResult> {
   try {
-    const url = new URL(DEFAULT_BASE_URL);
+    const url = new URL(NTT_BASE_URL);
     url.searchParams.append('appid', appid);
     url.searchParams.append('string', address);
 
@@ -182,62 +212,75 @@ async function geocodeAddressWithNTT(
 
     // Check HTTP status - retry only handles network errors, not HTTP errors
     if (!response.ok) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: `HTTP error ${response.status}`,
-      };
+      return failedResult(`HTTP error ${response.status}`);
     }
 
     const data = await response.json();
-    console.log(data);
 
+    if (data.status === 'error') {
+      return failedResult(data.error_message || 'ジオコーディングAPIがエラーを返しました');
+    }
 
     // Check if geocoding array exists and has at least one result
     if (!data.geocoding || !Array.isArray(data.geocoding) || data.geocoding.length === 0) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: '該当する住所が見つかりませんでした',
-      };
+      return failedResult('該当する住所が見つかりませんでした');
     }
 
     // Get geocoding
     const geocoding = data.geocoding[0];
     if (!geocoding || geocoding.lat === undefined || geocoding.lon === undefined) {
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: 'レスポンスから座標情報を抽出できませんでした',
-      };
+      return failedResult('レスポンスから座標情報を抽出できませんでした');
     }
 
     // Extract data from geocoding
     const lat = parseFloat(geocoding.lat);
     const lon = parseFloat(geocoding.lon);
-    const label = geocoding.addr || address;
 
     return {
       lat,
       lon,
-      label,
+      label: geocoding.addr || address,
       success: true,
+      positionLevel: positionLevelFromNtt(geocoding.level),
+      judgmentValue: formatJudgmentValue('NTT', geocoding.level),
     };
   } catch (error: any) {
-    return {
-      lat: 0,
-      lon: 0,
-      label: '',
-      success: false,
-      errorMessage: error.message,
-    };
+    return failedResult(error.message);
   }
+}
+
+/**
+ * ABR ジオコーダの IPC 結果を GeocodingResult へ変換する。
+ * coordinate_level（代表点のレベル）が位置レベルの判定値になる。
+ * match_level は住所文字列の一致階層であり、座標の粒度と乖離しうる。
+ */
+export function toGeocodingResultFromAbr(
+  result: {
+    success: boolean;
+    lat?: number;
+    lon?: number;
+    label?: string;
+    errorMessage?: string;
+    coordinateLevel?: string;
+  },
+  address: string
+): GeocodingResult {
+  // 座標が有限値でない結果は失敗として扱う。ABR は住所を特定できないとき
+  // lat / lon に null を返すため、undefined 判定だけでは通り抜ける。
+  const lat = toFiniteNumber(result.lat);
+  const lon = toFiniteNumber(result.lon);
+  if (!result.success || lat === undefined || lon === undefined) {
+    return failedResult(result.errorMessage || '該当する住所が見つかりませんでした');
+  }
+
+  return {
+    lat,
+    lon,
+    label: result.label || address,
+    success: true,
+    positionLevel: positionLevelFromAbr(result.coordinateLevel),
+    judgmentValue: formatJudgmentValue('ABR', result.coordinateLevel),
+  };
 }
 
 async function geocodeAddressWithABR(
@@ -245,50 +288,16 @@ async function geocodeAddressWithABR(
   _unused: string // Keep for type consistency with other geocoding functions
 ): Promise<GeocodingResult> {
   try {
-    
     // Check if we're in Electron context
     if (typeof window !== 'undefined' && window.electronAPI) {
-      
       const result = await window.electronAPI.abr.geocode(address);
-
-      if (result.success && result.lat !== undefined && result.lon !== undefined) {
-        return {
-          lat: result.lat,
-          lon: result.lon,
-          label: result.label || address,
-          success: true,
-          score: result.score,
-          matchLevel: result.matchLevel,
-          coordinateLevel: result.coordinateLevel,
-          rsdtAddrFlg: result.rsdtAddrFlg,
-        };
-      } else {
-        return {
-          lat: 0,
-          lon: 0,
-          label: '',
-          success: false,
-          errorMessage: result.errorMessage || '該当する住所が見つかりませんでした',
-        };
-      }
-    } else {
-      // Not in Electron context
-      return {
-        lat: 0,
-        lon: 0,
-        label: '',
-        success: false,
-        errorMessage: 'ABR geocoding requires Electron environment',
-      };
+      return toGeocodingResultFromAbr(result, address);
     }
+
+    // Not in Electron context
+    return failedResult('ABR geocoding requires Electron environment');
   } catch (error: any) {
-    return {
-      lat: 0,
-      lon: 0,
-      label: '',
-      success: false,
-      errorMessage: error.message,
-    };
+    return failedResult(error.message);
   }
 }
 
@@ -302,15 +311,16 @@ async function geocodeAddressWithZenrin(
     // with other geocoding functions (AWS, NTT), but not used in this dummy implementation
     const lat = Math.random() * 90;
     const lon = Math.random() * 180;
-    return { lat, lon, label: 'ZenrinLabel', success: true };
-  } catch (error: any) {
     return {
-      lat: 0,
-      lon: 0,
-      label: '',
-      success: false,
-      errorMessage: error.message,
+      lat,
+      lon,
+      label: 'ZenrinLabel',
+      success: true,
+      positionLevel: UNKNOWN_POSITION_LEVEL,
+      judgmentValue: '',
     };
+  } catch (error: any) {
+    return failedResult(error.message);
   }
 }
 
@@ -357,7 +367,7 @@ export async function testRun(formData: FormValues): Promise<GeocodingResult> {
 
   // ジオコーディングを実行
   // ABR doesn't need token/code, others use apiToken
-  const result = apiType === 'abr' 
+  const result = apiType === 'abr'
     ? await geocodeFunc(firstAddress, '')
     : await geocodeFunc(firstAddress, apiToken);
 
@@ -369,7 +379,7 @@ export async function runExecution(
   formData: FormValues
 ): Promise<RunResultSummary> {
   const { apiType, apiToken, csvData, columns } = formData;
-  
+
   // Validate
   if (!csvData || csvData.length === 0) {
     throw new Error('CSVデータが未設定または空です');
@@ -395,7 +405,7 @@ export async function runExecution(
   const geocodeFunc = getGeocodingFunction(apiType);
 
   const results: GeocodingResult[] = [];
-  
+
   if (apiType === 'ntt') {
     // NTT: Run sequentially like Python code
     // Rate limiting: 0.2 seconds between each request (rate_limit_sleep = 0.2)
@@ -403,7 +413,7 @@ export async function runExecution(
       const address = addresses[index];
       const result = await geocodeFunc(address, apiToken);
       results.push(result);
-      
+
       // Rate limiting: 0.2 seconds between requests (like Python code line 342-344)
       if (index < addresses.length - 1) {
         await sleep(200); // 0.2 seconds = 200ms

@@ -36,6 +36,69 @@
       "when": 1774695293370,
       "tag": "0004_careless_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1780278591913,
+      "tag": "0005_silly_black_bolt",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1780379578034,
+      "tag": "0006_silent_millenium_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1780399109095,
+      "tag": "0007_absurd_layla_miller",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1780450995446,
+      "tag": "0008_magenta_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1781134352946,
+      "tag": "0009_robust_wallflower",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1783668927603,
+      "tag": "0010_handy_power_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1784108838623,
+      "tag": "0011_yielding_mockingbird",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1786429676944,
+      "tag": "0012_brown_kate_bishop",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1786708016953,
+      "tag": "0013_aromatic_vance_astro",
+      "breakpoints": true
     }
   ]
 }

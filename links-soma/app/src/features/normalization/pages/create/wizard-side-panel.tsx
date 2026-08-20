@@ -1,6 +1,6 @@
 /**
- * ウィザードサイドパネルコンポーネント
- * データセットの説明とカラム設定のヒントを表示
+ * ウィザードサイドパネル: ステップの説明と、データセットのマニュアルヒント
+ * （取得方法・必要なカラム・注意）を常時表示する。
  */
 
 import {
@@ -11,12 +11,18 @@ import {
   Caption1,
   Caption1Strong,
   Subtitle2,
+  Accordion,
+  AccordionItem,
+  AccordionHeader,
+  AccordionPanel,
 } from "@fluentui/react-components";
-import { Info20Regular, DocumentText20Regular } from "@fluentui/react-icons";
-import { getNormalizationDatasetInfo } from "../../util/extract-dataset-columns-from-schema";
+import { Info20Regular, Warning16Regular } from "@fluentui/react-icons";
+import { Fragment } from "react";
 import { lang } from "../../../../shared/config/lang";
 import { LanguageMap } from "../../../../shared/config/metadata";
+import { type NormalizationPurpose } from "../../hooks/use-form-normalization";
 import { type WizardStepConfig } from "./wizard-steps";
+import { getManualHint, type ManualHint } from "./manual-hints";
 
 const useStyles = makeStyles({
   sidePanel: {
@@ -34,14 +40,14 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     marginBottom: tokens.spacingVerticalM,
   },
-  // Subtitle2にmarginリセットを追加
   sectionTitle: {
     margin: 0,
   },
-  // Caption1のデフォルト色と異なるため色のみ指定
   description: {
     color: tokens.colorNeutralForeground2,
     padding: `0 ${tokens.spacingHorizontalS}`,
+    // 目的別説明文は段落（空行）を含むため改行を保持する。
+    whiteSpace: "pre-line",
   },
   requiredBadge: {
     display: "inline-block",
@@ -72,7 +78,6 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusSmall,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  // Caption1Strongにレイアウト指定を追加
   columnLabel: {
     marginBottom: tokens.spacingVerticalXS,
   },
@@ -81,33 +86,113 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     lineHeight: tokens.lineHeightBase200,
   },
-  emptyMessage: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
-    fontStyle: "italic",
-  },
   divider: {
     margin: `${tokens.spacingVerticalM} 0`,
   },
-  tipSection: {
-    marginTop: tokens.spacingVerticalL,
-  },
-  tipItem: {
+  // Accordion 内のパネル本文はやや余白を詰める
+  accordionPanelBody: {
     display: "flex",
-    alignItems: "flex-start",
-    gap: tokens.spacingHorizontalS,
-    marginBottom: tokens.spacingVerticalS,
+    flexDirection: "column",
+    gap: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+  },
+  // 箇条書き（取得方法・注意）
+  bulletList: {
+    margin: 0,
+    paddingLeft: tokens.spacingHorizontalL,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+  },
+  bulletItem: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    lineHeight: tokens.lineHeightBase200,
+  },
+  // 必要なカラム1件
+  manualColumnItem: {
     padding: tokens.spacingVerticalS,
     backgroundColor: tokens.colorNeutralBackground1,
     borderRadius: tokens.borderRadiusSmall,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  tipIcon: {
-    flexShrink: 0,
-    color: tokens.colorBrandForeground1,
+  manualColumnName: {
+    marginBottom: tokens.spacingVerticalXS,
   },
-  tipText: {
+  manualColumnDesc: {
     fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
+  },
+  manualColumnExample: {
+    marginTop: tokens.spacingVerticalXS,
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    fontFamily: tokens.fontFamilyMonospace,
+  },
+  // 期待するファイル形式（見出し＋形式バッジ）。アコーディオン外に常時表示する。
+  formatSection: {
+    marginBottom: tokens.spacingVerticalM,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+  },
+  formatBadgeList: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+  },
+  formatBadge: {
+    padding: `0 ${tokens.spacingHorizontalS}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusSmall,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+    fontFamily: tokens.fontFamilyMonospace,
+  },
+  // 形式が複数あるときの「または」区切り
+  formatSeparator: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+  },
+  formatNote: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
+    lineHeight: tokens.lineHeightBase200,
+  },
+  // 注意ブロックの外枠（見出し＋警告ブロック）。アコーディオン外に常時表示する。
+  cautionSection: {
+    marginTop: tokens.spacingVerticalM,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+  },
+  // 注意・サポート外表記の警告ブロック
+  cautionBlock: {
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXS,
+    padding: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    borderRadius: tokens.borderRadiusSmall,
+    border: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  cautionItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: tokens.spacingHorizontalXS,
+  },
+  cautionIcon: {
+    flexShrink: 0,
+    marginTop: "2px",
+    color: tokens.colorStatusWarningForeground1,
+  },
+  cautionText: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorStatusWarningForeground1,
     lineHeight: tokens.lineHeightBase200,
   },
 });
@@ -115,82 +200,117 @@ const useStyles = makeStyles({
 type Props = {
   /** 現在のステップ設定 */
   stepConfig: WizardStepConfig;
+  /** 名寄せの目的。基準日ヒントの出し分けに使う */
+  purpose: NormalizationPurpose;
 };
 
-export const WizardSidePanel = ({ stepConfig }: Props): JSX.Element => {
+export const WizardSidePanel = ({
+  stepConfig,
+  purpose,
+}: Props): JSX.Element => {
   const styles = useStyles();
 
-  // データセットのカラム情報を取得
-  const datasetInfo = stepConfig.schemaKey
-    ? getNormalizationDatasetInfo(stepConfig.schemaKey)
-    : undefined;
+  // マニュアル由来のヒント（取得方法・必要なカラム・注意）を取得
+  const manualHint = getManualHint(stepConfig.schemaKey);
 
-  const renderColumnHints = (): JSX.Element => {
-    if (
-      !datasetInfo ||
-      !datasetInfo.hasColumns ||
-      datasetInfo.columns.length === 0
-    ) {
-      return (
-        <Text className={styles.emptyMessage}>
-          このデータセットにはカラム設定がありません
-        </Text>
-      );
-    }
-
-    // building_type_determination の場合、家屋種別の説明も追加
-    const additionalHints =
-      stepConfig.schemaKey === "building_type_determination"
-        ? [
-            {
-              key: "building_type_values",
-              label:
-                lang.components.normalizationParameters.building_type_values
-                  .label,
-              description:
-                lang.components.normalizationParameters.building_type_values
-                  .description,
-              isColumn: false, // カラムではない
-            },
-          ]
-        : [];
-
-    // カラム情報にisColumnフラグを追加
-    const columnHints = datasetInfo.columns.map((col) => ({
-      ...col,
-      isColumn: true,
-    }));
-
-    const allHints = [...columnHints, ...additionalHints];
+  // マニュアル由来の情報を表示する。取得方法・必要なカラムは折りたたみ、
+  // 注意（サポート外表記＝エラー予防）は折りたたまず常時表示する。
+  const renderManualHints = (hint: ManualHint): JSX.Element => {
+    // 初期で開いておくパネル: 取得方法とカラムは常に表示候補
+    const defaultOpen: string[] = ["acquisition"];
+    if (hint.columns.length > 0) defaultOpen.push("columns");
 
     return (
-      <div className={styles.columnList}>
-        {allHints.map((hint) => (
-          <div key={hint.key} className={styles.columnItem}>
-            <Caption1Strong className={styles.columnLabel}>
-              {hint.label}
-              {hint.isColumn && "カラム"}
-            </Caption1Strong>
-            {hint.description && (
-              <div className={styles.columnDescription}>{hint.description}</div>
+      <>
+        {/* 期待するファイル形式: アップロード前に判断できるよう、折りたたまず先頭に置く。 */}
+        {hint.formats.length > 0 && (
+          <div className={styles.formatSection}>
+            <Caption1Strong>アップロードするファイル形式</Caption1Strong>
+            <div className={styles.formatBadgeList}>
+              {hint.formats.map((format, i) => (
+                <Fragment key={format}>
+                  {i > 0 && (
+                    <Text as="span" className={styles.formatSeparator}>
+                      または
+                    </Text>
+                  )}
+                  <Text as="span" className={styles.formatBadge}>
+                    {format}
+                  </Text>
+                </Fragment>
+              ))}
+            </div>
+            {hint.formats.length > 1 && (
+              <Text as="span" className={styles.formatNote}>
+                いずれか1つの形式でアップロードしてください。
+              </Text>
             )}
           </div>
-        ))}
-      </div>
+        )}
+
+        <Accordion collapsible defaultOpenItems={defaultOpen} multiple>
+          {/* 取得方法 */}
+          <AccordionItem value="acquisition">
+            <AccordionHeader>取得方法</AccordionHeader>
+            <AccordionPanel>
+              <div className={styles.accordionPanelBody}>
+                <ul className={styles.bulletList}>
+                  {hint.acquisition.map((line, i) => (
+                    <li key={i} className={styles.bulletItem}>
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </AccordionPanel>
+          </AccordionItem>
+
+          {/* 必要なカラム */}
+          {hint.columns.length > 0 && (
+            <AccordionItem value="columns">
+              <AccordionHeader>
+                {`必要なカラム (${hint.columns.length})`}
+              </AccordionHeader>
+              <AccordionPanel>
+                <div className={styles.accordionPanelBody}>
+                  {hint.columns.map((col) => (
+                    <div key={col.name} className={styles.manualColumnItem}>
+                      <Caption1Strong className={styles.manualColumnName}>
+                        {col.name}
+                      </Caption1Strong>
+                      <div className={styles.manualColumnDesc}>{col.desc}</div>
+                      {col.example && (
+                        <div className={styles.manualColumnExample}>
+                          例: {col.example}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </AccordionPanel>
+            </AccordionItem>
+          )}
+        </Accordion>
+
+        {/* 注意・サポート外表記: 見落とすとエラーになるため折りたたまず常時表示。 */}
+        {hint.cautions && hint.cautions.length > 0 && (
+          <div className={styles.cautionSection}>
+            <Caption1Strong>注意</Caption1Strong>
+            <div className={styles.cautionBlock}>
+              {hint.cautions.map((caution, i) => (
+                <div key={i} className={styles.cautionItem}>
+                  <Warning16Regular className={styles.cautionIcon} />
+                  <Text as="span" className={styles.cautionText}>
+                    {caution}
+                  </Text>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </>
     );
   };
-
-  // 推定対象選定用データ向けのヒント
-  const renderBuildingTypeDeterminationTips = (): JSX.Element => (
-    <div className={styles.tipSection}>
-      <div className={styles.tipItem}>
-        <DocumentText20Regular className={styles.tipIcon} />
-        <Text className={styles.tipText}>
-          登記情報や建物ポリゴンで選択したデータセットを使用することもできます。
-        </Text>
-      </div>
-    </div>
-  );
 
   return (
     <aside className={styles.sidePanel}>
@@ -237,7 +357,7 @@ export const WizardSidePanel = ({ stepConfig }: Props): JSX.Element => {
                 <div className={styles.columnDescription}>
                   {
                     lang.components.normalizationParameters
-                      .settingsReferenceDate.description
+                      .settingsReferenceDate.descriptionByPurpose[purpose]
                   }
                 </div>
               </div>
@@ -261,17 +381,10 @@ export const WizardSidePanel = ({ stepConfig }: Props): JSX.Element => {
         <>
           <Divider className={styles.divider} />
 
+          {/* 取得方法・必要なカラムは自己ラベルのアコーディオンなので、包む見出しは置かない。 */}
           <section className={styles.section}>
-            <div className={styles.sectionHeader}>
-              <Subtitle2 as="h4" className={styles.sectionTitle}>
-                カラム設定のヒント
-              </Subtitle2>
-            </div>
-            {renderColumnHints()}
+            {manualHint && renderManualHints(manualHint)}
           </section>
-
-          {stepConfig.schemaKey === "building_type_determination" &&
-            renderBuildingTypeDeterminationTips()}
         </>
       )}
     </aside>

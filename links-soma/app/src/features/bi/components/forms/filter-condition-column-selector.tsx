@@ -135,10 +135,16 @@ export const FilterConditionColumnSelector = ({
     currentFields.map((item) => item.value.referenceColumn),
   );
 
-  /** ダイアログを消すとselectedColumnsが空になってしまうため追加.あってるのか少し不安 */
+  // 保存済みの参照カラム列が変わったら選択状態を同期する。
+  // currentFields は親の再レンダーで identity が変わるため、値（参照カラム列）で比較する。
+  // identity 依存だと毎レンダー選択がリセットされ、チェック操作が一瞬で巻き戻る。
+  const selectedColumnsKey = JSON.stringify(
+    currentFields.map((item) => item.value.referenceColumn),
+  );
   useEffect(() => {
     setSelectedColumns(currentFields.map((item) => item.value.referenceColumn));
-  }, [currentFields]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentFields は key で値比較
+  }, [selectedColumnsKey]);
 
   const onSave = (): void => {
     if (selectedColumns.length === 0) {

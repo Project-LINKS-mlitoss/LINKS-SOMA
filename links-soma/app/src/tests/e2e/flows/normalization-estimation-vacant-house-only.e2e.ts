@@ -2,7 +2,8 @@
  * 空き家調査結果のみ付与した最小構成の名寄せ・推定 E2Eテスト
  *
  * test-matrix.md N19 対応。
- * 必須データ (水道閉開栓・水道使用量・住基・国勢調査) + vacant_house のみ。
+ * 必須データ (水道閉開栓・水道使用量・住基) + vacant_house のみ。
+ * ジオメトリ源を持たない構成のため、推定画面の地域集計フォームは非表示になる (#1924)。
  * 他 optional (geocoding / building_registry / building_polygon /
  * building_type_determination / optional_data_source) はすべて skip。
  *
@@ -12,9 +13,11 @@
  *
  * vacant_house の経路 (コード根拠):
  * - param_adapter.py:117: vacant_house UI param → labels_data に変換
- * - IF001.py:391-397: runtime_cfg["labels"] 経由で assign_labels() が is_vacant カラムを追加
- * - vacant_house は preprocess_type="e014" task を作らない (labels 経路)
- *   → expectedJoinSteps = 1 (juki) + 0 (touki skip) + 0 (geocoding skip) = 1
+ * - IF001.py Step 5: runtime_cfg["labels"] 経由で assign_labels(stats=...) が
+ *   is_vacant カラムを追加し、調査結果の住所一致率を preprocess_type="e014" の
+ *   job_task として記録する (#1775)
+ *   → expectedJoinSteps = 1 (juki) + 0 (touki skip) + 0 (geocoding skip)
+ *     + 1 (vacant_house) = 2
  *
  * 実行方法:
  * cd app && npm run e2e -- normalization-estimation-vacant-house-only
@@ -100,12 +103,18 @@ test.describe("空き家のみ付与最小構成名寄せ・推定処理", () =>
 
     expect(finalStatus).toBe("complete");
 
-    // expectedJoinSteps = 1 (juki) のみ
-    // (touki/geocoding=skip、vacant_house は labels 経路で join task を作らない)
-    await verifyNormalizationJoiningRates(page, {
-      expectedJoinSteps: 1,
+    // expectedJoinSteps = 2 (juki + vacant_house)。touki/geocoding=skip。
+    // vacant_house は #1775 で調査結果の住所一致率を e014 task として記録する。
+    const rates = await verifyNormalizationJoiningRates(page, {
+      expectedJoinSteps: 2,
       label: "名寄せ（空き家のみ付与最小構成）",
     });
+
+    // 「処理一覧」に空き家調査結果の結合率行が並ぶこと（#1775）
+    expect(
+      rates.some((r) => r.input_source?.includes("空き家調査結果")),
+      "空き家調査結果の結合率行が処理一覧にない",
+    ).toBe(true);
   });
 
   test("名寄せ結果を名前をつけて保存できること", async () => {
@@ -124,12 +133,16 @@ test.describe("空き家のみ付与最小構成名寄せ・推定処理", () =>
       createHashIncludes: "evaluation/create",
     });
 
-    await fillEstimationForm(page, { datasetName: SAVED_DATASET_NAME });
+    // geocoding / buildingPolygon を両方 skip した構成では地域集計フォームが出ない（#1924）
+    await fillEstimationForm(page, {
+      datasetName: SAVED_DATASET_NAME,
+      skipAreaGrouping: true,
+    });
 
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

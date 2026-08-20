@@ -1,13 +1,19 @@
 import { makeStyles } from "@fluentui/react-components";
 import { useFetchResultViews } from "../../../shared/hooks/use-fetch-result-views";
 import { ViewContainer } from "../../bi/components";
-import { ButtonCreateView } from "./button-create-view";
+import { ButtonAddView } from "./button-add-view";
 import { EmptyEditResultViews } from "./empty-edit-result-views";
 
 const useStyles = makeStyles({
   root: {
     display: "grid",
     gap: "16px",
+  },
+  addButtons: {
+    display: "flex",
+    gap: "16px",
+    alignItems: "center",
+    flexWrap: "wrap",
   },
   template2th: {
     display: "grid",
@@ -86,7 +92,11 @@ export const PreviewResultSheet = ({ sheetId }: Props): JSX.Element | null => {
           />
         ))}
       </div>
-      {data.length !== 0 && <ButtonCreateView />}
+      {data.length !== 0 && (
+        <div className={styles.addButtons}>
+          <ButtonAddView />
+        </div>
+      )}
     </div>
   );
 };

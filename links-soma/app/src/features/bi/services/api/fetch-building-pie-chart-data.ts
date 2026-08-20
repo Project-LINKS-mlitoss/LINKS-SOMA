@@ -15,6 +15,8 @@ import {
   getBuildingPredictedLabelColumn,
   THRESHOLD_COLUMN_BASES,
 } from "../../util/threshold-column-utils";
+import { resolveChartAggregation } from "../../util/chart-aggregation";
+import { PIE_UNGROUPED_ROW_LIMIT } from "../../config/chart-limits";
 
 type Params = {
   view: PieView;
@@ -48,9 +50,6 @@ export const fetchBuildingPieChartData = async ({
     (p): p is FilterCondition /** startsWithが型推論しないため */ =>
       p.key.startsWith("filter_"),
   );
-  const groupAggregation = view.parameters.find(
-    (p) => p.type === "group_aggregation",
-  );
 
   // 閾値パラメータの抽出
   const threshold = extractThresholdFromParameters(view.parameters);
@@ -79,8 +78,16 @@ export const fetchBuildingPieChartData = async ({
     throw new Error("ラベルと値の設定は必須です");
   }
 
+  /**
+   * 円グラフは区分けと集計を同じカラムで行う。
+   * 区分け（CASE式）は常にラベルのカラムに対して作られるため、集計対象を別カラムにすると
+   * 「区分けの軸」と「集計する量」が食い違う。UI側でも「値」はラベルに固定しているので、
+   * 保存済みビューの値がラベルと異なっていてもここでラベル側に揃える。
+   */
+  const valueColumn = xAxis.value;
+
   // 閾値に基づいて値カラム名を解決
-  const resolvedValueColumn = resolveValueColumn(yAxis.value);
+  const resolvedValueColumn = resolveValueColumn(valueColumn);
 
   /** 項目のラベル情報 */
   const COLUMNS = {
@@ -96,21 +103,25 @@ export const fetchBuildingPieChartData = async ({
     yAxisColumn: {
       type: "number",
       unit: BUILDING_DATASET_COLUMN_METADATA[
-        yAxis.value as BUILDING_DATASET_COLUMN
+        valueColumn as BUILDING_DATASET_COLUMN
       ].unit,
       label:
-        BUILDING_DATASET_COLUMN_METADATA[yAxis.value as BUILDING_DATASET_COLUMN]
+        BUILDING_DATASET_COLUMN_METADATA[valueColumn as BUILDING_DATASET_COLUMN]
           .label,
     },
   } as const;
 
-  // クエリのベース作成（全レコードを対象に集計するためselectを使用）
+  /**
+   * クエリのベース作成（全レコードを対象に集計するためselectを使用）
+   *
+   * ラベルと値は同一カラムなので取得するのは1カラム。閾値が設定されている場合は
+   * 解決後のカラム（例: predicted_label_50）を元のカラム名の別名で取得し、
+   * 以降の階層はこの別名だけを参照する。
+   * data_set_detail_buildingsのColumn名とそれぞれのvalueに定義された値が一致していることが前提でrawを利用。
+   */
   let query = db
     .select({
-      /** data_set_detail_buildingsのColumn名とそれぞれのvalueに定義された値が一致していることが前提でrawを利用 */
-      [xAxis.value]: sql.raw(`${xAxis.value}`).as(xAxis.value),
-      // 閾値が設定されている場合は解決されたカラム名を使用
-      [yAxis.value]: sql.raw(`${resolvedValueColumn}`).as(yAxis.value),
+      [valueColumn]: sql.raw(`${resolvedValueColumn}`).as(valueColumn),
     })
     .from(data_set_detail_buildings)
     .$dynamic();
@@ -203,24 +214,37 @@ export const fetchBuildingPieChartData = async ({
     });
 
     const GroupLabel = `group` as const;
-    const caseQuery = conditionsToCaseQueryBuilder(xAxis.value, float);
+    const caseQuery = conditionsToCaseQueryBuilder(valueColumn, float);
 
     const groupQuery = db
       .select({
-        [xAxis.value]: baseQuery[xAxis.value],
-        [yAxis.value]: baseQuery[yAxis.value],
+        [valueColumn]: baseQuery[valueColumn],
         [GroupLabel]: caseQuery.as("caseQuery"),
       })
       .from(baseQuery)
       .as("GroupLabel");
 
+    /**
+     * 件数集計はグループに属する行数そのものを数えるため count(*) を使う。
+     * count(値カラム) にすると値カラムがNULLの行が件数から外れ、
+     * 「値」に何を選んだかで構成比が変わってしまう。
+     *
+     * 平均・合計の集計対象にはサブクエリの別名（valueColumn）を渡す。
+     * 閾値解決後の実カラム名（例: predicted_label_50）はサブクエリで別名に畳まれており、
+     * この階層には存在しないため参照するとSQLエラーになる。
+     *
+     * 集計方法が未設定のビューでも表示側と同じ既定になるよう共通の解決関数を使う。
+     */
+    const aggregation = resolveChartAggregation(view.parameters, view.style);
+    const aggregationQuery =
+      aggregation === "count"
+        ? `count(*) as ${valueColumn}`
+        : `${aggregation}(${valueColumn}) as ${valueColumn}`;
+
     const result = db
       .select({
         x: groupQuery[GroupLabel],
-        // 閾値が設定されている場合は解決されたカラム名を使用
-        y: sql.raw(
-          `${groupAggregation?.value || "avg"}(${resolvedValueColumn}) as ${yAxis.value}`,
-        ),
+        y: sql.raw(aggregationQuery),
         [GroupLabel]: groupQuery[GroupLabel],
       })
       .from(groupQuery)
@@ -236,8 +260,25 @@ export const fetchBuildingPieChartData = async ({
       .from(data_set_detail_buildings)
       .where(and(...queryWheres));
 
+    /**
+     * 扇形と凡例をラベルのグループの設定順に並べる。
+     * グループ条件は上にあるものから先に判定されるため、その優先順位を図の並びでも保つ。
+     * SQLのGROUP BYは並び順を保証しないので、取得後に設定順へ並べ替える。
+     */
+    const groupOrder = groupConditions.map(
+      (condition) => condition.value.label,
+    );
+    const orderedResult = [...result].sort((a, b) => {
+      const indexA = groupOrder.indexOf(a.x as string);
+      const indexB = groupOrder.indexOf(b.x as string);
+      return (
+        (indexA === -1 ? groupOrder.length : indexA) -
+        (indexB === -1 ? groupOrder.length : indexB)
+      );
+    });
+
     return {
-      data: result.map((item) => ({
+      data: orderedResult.map((item) => ({
         x: item.x as string /* sql.rawの戻り値がunknownのため明示的にキャスト */,
         y: item.y as number /* sql.rawの戻り値がunknownのため明示的にキャスト */,
       })),
@@ -247,12 +288,18 @@ export const fetchBuildingPieChartData = async ({
     };
   }
 
+  /**
+   * ラベルのグループがない場合は1行が1つの扇形になる。
+   * 数万件の建物をそのまま扇形にすると描画が固まるため件数を打ち切る。
+   * この状態は設定が未完了なだけで図として成立しておらず、ビュー側で設定を促している。
+   */
   const result = db
     .select({
-      x: baseQuery[xAxis.value],
-      y: baseQuery[yAxis.value],
+      x: baseQuery[valueColumn],
+      y: baseQuery[valueColumn],
     })
     .from(baseQuery)
+    .limit(PIE_UNGROUPED_ROW_LIMIT)
     .all();
 
   // totalCountもselectDistinctの影響を受けないよう独立したクエリで計算

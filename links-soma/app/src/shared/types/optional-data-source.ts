@@ -8,8 +8,11 @@ export type OptionalDataSourceEntry = {
   value: unknown;
 };
 
-/** 説明変数追加用データの内部カラム名サフィックス */
+/** 建物関連データの内部カラム名サフィックス */
 export const ODS_SUFFIX = "_ods";
+
+/** 建物関連データの表示名プレフィックス */
+export const ODS_DISPLAY_PREFIX = "[追加] ";
 
 /**
  * ML側のカラム名 → DB/UI側のカラム名の暫定マッピング
@@ -44,7 +47,7 @@ const ML_TO_DB_COLUMN_MAP: Record<string, string> = {
  */
 export const toOdsDisplayName = (columnName: string): string => {
   if (columnName.endsWith(ODS_SUFFIX)) {
-    return `[追加] ${columnName.slice(0, -ODS_SUFFIX.length)}`;
+    return `${ODS_DISPLAY_PREFIX}${columnName.slice(0, -ODS_SUFFIX.length)}`;
   }
   // ML名 → DB名の暫定変換を適用してから日本語化
   const dbColumnName = ML_TO_DB_COLUMN_MAP[columnName] ?? columnName;

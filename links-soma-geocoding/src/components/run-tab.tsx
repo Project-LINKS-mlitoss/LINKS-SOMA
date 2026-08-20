@@ -17,7 +17,13 @@ import {
   RunResultSummary,
   FormValues,
   getGeocodingFunction,
+  toGeocodingResultFromAbr,
+  failedResult,
 } from "../hooks/use-geocoding";
+import {
+  UNKNOWN_POSITION_LEVEL,
+  summarizePositionLevels,
+} from "../lib/position-level";
 import Papa from "papaparse";
 
 const useStyles = makeStyles({
@@ -141,6 +147,8 @@ export const RunTab = (): JSX.Element => {
             lon: 139.767125,
             label: `モック${b * batchSize + i + 1}`,
             success: true,
+            positionLevel: "号・地番",
+            judgmentValue: "",
           });
         }
         setCompletedCount((b + 1) * batchSize);
@@ -243,17 +251,9 @@ export const RunTab = (): JSX.Element => {
               const batchResults = await window.electronAPI.abr.geocodeBatch(batch);
               
               // Convert to GeocodingResult format
-              const convertedResults: GeocodingResult[] = batchResults.map((r) => ({
-                lat: r.lat || 0,
-                lon: r.lon || 0,
-                label: r.label || '',
-                success: r.success,
-                errorMessage: r.errorMessage,
-                score: r.score,
-                matchLevel: r.matchLevel,
-                coordinateLevel: r.coordinateLevel,
-                rsdtAddrFlg: r.rsdtAddrFlg,
-              }));
+              const convertedResults: GeocodingResult[] = batchResults.map(
+                (r, offset) => toGeocodingResultFromAbr(r, batch[offset])
+              );
               
               // Add results in order
               results.push(...convertedResults);
@@ -331,37 +331,24 @@ export const RunTab = (): JSX.Element => {
       return;
     }
     const formData = getValues();
-    const { csvData, apiType } = formData;
+    const { csvData } = formData;
 
+    // 全行・全ジオコーダで同一の列構成にする。PapaParse は 1 行目のキーだけで
+    // ヘッダーを決めるため、値の有無で列を出し分けると列そのものが消える。
     const updatedData = csvData.map((row, index) => {
-      const result = runSummary.results[index] || {
-        lat: 0,
-        lon: 0,
-        success: false,
-        errorMessage: "範囲外",
-      };
-      
-      const baseRow = {
+      const result = runSummary.results[index] ?? failedResult("範囲外");
+
+      return {
         ...row,
-        緯度: result.lat,
-        経度: result.lon,
-        ...(result.success
-          ? {}
-          : { エラーメッセージ: result.errorMessage || "原因不明のエラー" }),
+        緯度: result.success ? result.lat : "",
+        経度: result.success ? result.lon : "",
+        ジオコーディング住所: result.success ? result.label : "",
+        位置レベル: result.success ? result.positionLevel : UNKNOWN_POSITION_LEVEL,
+        判定値: result.success ? result.judgmentValue : "",
+        エラーメッセージ: result.success
+          ? ""
+          : result.errorMessage || "原因不明のエラー",
       };
-      
-      // Add ABR specific fields if using ABR API
-      if (apiType === 'abr' && result.success) {
-        return {
-          ...baseRow,
-          ...(result.score !== undefined && { score: result.score }),
-          ...(result.matchLevel && { match_level: result.matchLevel }),
-          ...(result.coordinateLevel && { coordinate_level: result.coordinateLevel }),
-          ...(result.rsdtAddrFlg !== undefined && { rsdt_addr_flg: result.rsdtAddrFlg }),
-        };
-      }
-      
-      return baseRow;
     });
 
     // CSV文字列へ変換し、BOMを付与
@@ -434,6 +421,28 @@ export const RunTab = (): JSX.Element => {
   };
 
   /**
+   * 位置レベルの内訳。緯度経度がどの住所階層の代表点かを件数で示す。
+   * 「号・地番」の割合が、座標が建物にどれだけ近いかの指標になる。
+   */
+  const renderPositionLevelBreakdown = (summary: RunResultSummary) => {
+    const breakdown = summarizePositionLevels(summary.results);
+    if (breakdown.length === 0) return null;
+
+    return (
+      <div className={styles.resultDetail}>
+        <strong>位置レベルの内訳:</strong>
+        <ul>
+          {breakdown.map(({ level, count, ratio }) => (
+            <li key={level} className={styles.resultList}>
+              {level}: {count}件 ({(ratio * 100).toFixed(1)}%)
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  };
+
+  /**
    * 本番実行の表示
    */
   const renderRunSummary = () => {
@@ -453,6 +462,8 @@ export const RunTab = (): JSX.Element => {
         <div>
           <strong>失敗数:</strong> {runSummary.failCount}
         </div>
+
+        {renderPositionLevelBreakdown(runSummary)}
 
         <div className={styles.resultDetail}>
           <strong>本番実行結果:</strong>

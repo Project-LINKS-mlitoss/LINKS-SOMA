@@ -1,0 +1,1 @@
+ALTER TABLE `tutorial_state` ADD `model_mode` text;

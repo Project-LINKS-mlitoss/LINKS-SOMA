@@ -1,4 +1,6 @@
 export * from "./build-feature-areas";
+export * from "./color-column";
+export * from "./update-layer-color";
 export * from "./build-feature-buildings";
 export * from "./convert-to-lng-lat";
 export * from "./create-add-layer-object";

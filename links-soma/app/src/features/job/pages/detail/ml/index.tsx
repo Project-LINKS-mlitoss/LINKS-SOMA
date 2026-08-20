@@ -9,7 +9,7 @@ import {
   Tooltip,
 } from "@fluentui/react-components";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeftRegular } from "@fluentui/react-icons";
+import { ArrowLeftRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import { DialogSaveWithName } from "../../../../../shared/components/dialog-save-with-name";
 import { useFetchJobTasks } from "../../../hooks/use-fetch-job-tasks";
 import { useFetchJobResults } from "../../../hooks/use-fetch-job-results";
@@ -18,6 +18,8 @@ import { downloadFile } from "../../../../../shared/utils/download-file";
 import { toOdsDisplayName } from "../../../../../shared/types/optional-data-source";
 import { useDialogState } from "../../../../../shared/hooks/use-dialog-state";
 import { useFetchJobs } from "../../../hooks/use-fetch-jobs";
+import { useJobElapsedSec } from "../../../hooks/use-job-elapsed";
+import { notifyJobChanged } from "../../../hooks/job-change-notifier";
 import {
   BreadcrumbBase,
   BreadcrumbItem,
@@ -25,13 +27,32 @@ import {
   TextWithTooltip,
 } from "../../../../../shared/components/ui";
 import { ErrorJobTaskInfo } from "../../../components/error-job-task-info";
-import { JobParametersSection } from "../../../components/job-parameters-section";
+import {
+  JobParametersSection,
+  type VerificationSection,
+} from "../../../components/job-parameters-section";
+import {
+  formatCandidateCount,
+  formatLift,
+  formatRatioAsPercent,
+  formatThresholdScore,
+  importantColumnsTitle,
+  toModelResultSections,
+} from "../../../util/model-result-rows";
+import { toErrorSections } from "../../../util/error-rows";
+import { lang } from "../../../../../shared/config/lang";
 import {
   FOOTER_HEIGHT,
   SIDEBAR_WIDTH,
 } from "../../../../../shared/config/layout-constants";
 import { THEME_COLORS } from "../../../../../shared/config/theme-colors";
 import { ROUTES } from "../../../../../shared/config/routes";
+import {
+  useTutorial,
+  tutorialStore,
+} from "../../../../../shared/tutorial/store";
+
+const m = lang.components.modelResult;
 
 const useStyles = makeStyles({
   root: {
@@ -82,6 +103,7 @@ const useStyles = makeStyles({
     display: "flex",
     justifyContent: "flex-end",
     alignItems: "center",
+    gap: tokens.spacingHorizontalM,
     padding: `${tokens.spacingVerticalL} ${tokens.spacingHorizontalXXL}`,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
     backgroundColor: tokens.colorNeutralBackground1,
@@ -281,11 +303,14 @@ const MESSAGE = {
 export function MlDetail(): JSX.Element {
   const styles = useStyles();
   const navigate = useNavigate();
+  const { phase, stage } = useTutorial();
+  const isTutorialModel = phase === "running" && stage === "model";
   const { id } = useParams<{ id: string }>();
   const { data } = useFetchJobTasks({ jobId: Number(id) });
   const { data: jobResultsData } = useFetchJobResults({ jobId: Number(id) });
   const { data: job, mutate } = useFetchJobs(Number(id));
   const { data: modelFiles } = useFetchModelFiles();
+  const realElapsedSec = useJobElapsedSec(Number(id));
 
   // job_idに対応するmodel_fileを取得
   const modelFile = modelFiles?.find(
@@ -301,6 +326,11 @@ export function MlDetail(): JSX.Element {
   const hasParameters =
     !!mlParams?.input_path &&
     (mlParams?.settings?.explanatory_variables?.length ?? 0) > 0;
+
+  // 実行情報カードの表示条件。検証情報のダウンロードボタンはこのカードの中にしかないため、
+  // 入力パスや説明変数が欠けたジョブでも、画面に出ている評価指標・エラーを取り出せるよう
+  // カード自体は出す（再実行ボタンは hasParameters のまま。再実行には設定一式が要る）
+  const canShowParameters = !!mlParams;
 
   const getDefaultName = (): string => {
     const createdAt = job?.[0]?.created_at;
@@ -341,14 +371,20 @@ export function MlDetail(): JSX.Element {
       ? data[0].result
       : null;
 
-  // 比率（0〜1）をパーセンテージ文字列に変換するヘルパー
-  // E021は比率で出力するため、表示時に×100する
-  const toPercent = (value: string | undefined, decimals = 1): string => {
-    if (!value) return "--";
-    const num = Number.parseFloat(value);
-    if (Number.isNaN(num)) return "--";
-    return `${(num * 100).toFixed(decimals)}%`;
-  };
+  // 比率→パーセントの変換は検証情報DLと共有する。画面とファイルで丸め方が
+  // 食い違うと、同じ指標が2通りの数値で流通するため
+  const toPercent = formatRatioAsPercent;
+
+  // 検証情報DL（NR007）に含める、この画面の動的な情報。
+  // 並びは画面の縦順（モデル → 精度指標 → 判定ライン → 特徴量重要度 → エラー）に合わせる
+  const verificationExtra: VerificationSection[] = [
+    ...toModelResultSections({
+      result,
+      modelFileName: modelFile?.file_name,
+      modelFileNote: modelFile?.note,
+    }),
+    ...toErrorSections(data, job?.[0]?.status),
+  ];
 
   // Precision@K テーブルデータ
   const precisionAtKData = result
@@ -457,6 +493,9 @@ export function MlDetail(): JSX.Element {
                         created_by_job_id: jobResultsData.job_id,
                       },
                     });
+                    // 保存名はガイドが参照 id から都度導出するため記録不要。
+                    // is_named 変化をガイドのジョブ状態 hook 等へ通知する。
+                    notifyJobChanged();
                     await mutate();
                   }}
                 />
@@ -488,7 +527,7 @@ export function MlDetail(): JSX.Element {
               <div className={styles.metricsCard}>
                 <span className={styles.metricsTitle}>
                   <TextWithTooltip
-                    textNode={"Precision@K（上位K件中の空き家割合）"}
+                    textNode={m.precisionSection}
                     tooltipContent={
                       <>
                         •モデルが「空き家の可能性が⾼い」と判定した上位K件のうち、既に空き家として把握されている建物がどれ
@@ -532,7 +571,7 @@ export function MlDetail(): JSX.Element {
               <div className={styles.metricsCard}>
                 <span className={styles.metricsTitle}>
                   <TextWithTooltip
-                    textNode="Lift（ランダム抽出比）"
+                    textNode={m.liftSection}
                     tooltipContent={
                       <>
                         •ランダムに建物を選んだ場合と⽐べて、モデルを使うことで何倍効率よく空き家を⾒つけられるかを⽰します。（Lift@Kが8.71X＝上位1,000件で⾒ると、ランダムに選んだ場合の約8.7倍の効率で既知の空き家が含まる）
@@ -561,9 +600,7 @@ export function MlDetail(): JSX.Element {
                       <tr key={row.k}>
                         <td className={styles.metricsTableCell}>{row.k}</td>
                         <td className={styles.metricsTableCellValue}>
-                          {row.value
-                            ? `${Number.parseFloat(row.value).toFixed(2)}x`
-                            : "--"}
+                          {formatLift(row.value)}
                         </td>
                       </tr>
                     ))}
@@ -576,7 +613,7 @@ export function MlDetail(): JSX.Element {
             <div className={styles.thresholdCard}>
               <span className={styles.metricsTitle}>
                 <TextWithTooltip
-                  textNode="判定ライン"
+                  textNode={m.thresholdSection}
                   tooltipContent={
                     <>
                       •空き家候補として抽出する件数やその基準（閾値）を⽰します。
@@ -590,29 +627,33 @@ export function MlDetail(): JSX.Element {
               </span>
               <div className={styles.thresholdGrid}>
                 <div className={styles.thresholdItem}>
-                  <span className={styles.thresholdLabel}>再現率目標</span>
+                  <span className={styles.thresholdLabel}>
+                    {m.recallTarget}
+                  </span>
                   <span className={styles.thresholdValue}>
                     {toPercent(result.recallTarget)}
                   </span>
                 </div>
                 <div className={styles.thresholdItem}>
-                  <span className={styles.thresholdLabel}>判定閾値スコア</span>
+                  <span className={styles.thresholdLabel}>
+                    {m.thresholdScore}
+                  </span>
                   <span className={styles.thresholdValue}>
-                    {result.threshold
-                      ? Number.parseFloat(result.threshold).toFixed(4)
-                      : "--"}
+                    {formatThresholdScore(result.threshold)}
                   </span>
                 </div>
                 <div className={styles.thresholdItem}>
-                  <span className={styles.thresholdLabel}>候補件数</span>
+                  <span className={styles.thresholdLabel}>
+                    {m.candidateCount}
+                  </span>
                   <span className={styles.thresholdValue}>
-                    {result.candidateCount
-                      ? `${Number.parseInt(result.candidateCount).toLocaleString()}件`
-                      : "--"}
+                    {formatCandidateCount(result.candidateCount)}
                   </span>
                 </div>
                 <div className={styles.thresholdItem}>
-                  <span className={styles.thresholdLabel}>候補割合</span>
+                  <span className={styles.thresholdLabel}>
+                    {m.candidateRatio}
+                  </span>
                   <span className={styles.thresholdValue}>
                     {toPercent(result.candidateRatio)}
                   </span>
@@ -624,11 +665,7 @@ export function MlDetail(): JSX.Element {
             <div className={styles.columnContainer}>
               <span className={styles.columnTitle}>
                 <TextWithTooltip
-                  textNode={
-                    chartData.length === 20
-                      ? `特徴量重要度（上位${chartData.length}件を表示）`
-                      : "特徴量重要度"
-                  }
+                  textNode={importantColumnsTitle(chartData.length)}
                   tooltipContent={
                     <>
                       •モデルがどのデータ項⽬をどの程度重視して推定しているかを⽰します。
@@ -696,13 +733,21 @@ export function MlDetail(): JSX.Element {
             </div>
           </>
         )}
-        {/* 実行設定 */}
-        {job && job[0] && hasParameters ? (
-          <JobParametersSection job={job[0]} />
+        {/* 実行情報（実行設定 + NR007 処理時間） */}
+        {job && job[0] && canShowParameters ? (
+          <JobParametersSection
+            durations={{
+              totalRealSec: realElapsedSec,
+              durationTotalSec: result?.durationTotalSec,
+              durationTrainingSec: result?.durationTrainingSec,
+            }}
+            extraSections={verificationExtra}
+            job={job[0]}
+          />
         ) : (
           <div className={styles.noParametersSection}>
             <Caption1Strong className={styles.noParametersHeading}>
-              実行設定
+              実行情報
             </Caption1Strong>
             <Caption1>なし</Caption1>
           </div>
@@ -711,19 +756,34 @@ export function MlDetail(): JSX.Element {
         <div className={styles.restartButtonWrapper}>
           {hasParameters ? (
             <Button
-              appearance="primary"
+              appearance="outline"
               onClick={() => navigate(ROUTES.MODEL.RECREATE(id || ""))}
             >
               再実行へ
             </Button>
           ) : (
             <Button
-              appearance="primary"
+              appearance="outline"
               onClick={() => navigate(ROUTES.MODEL.ROOT)}
             >
               モデル構築へ
             </Button>
           )}
+          <Button
+            appearance="primary"
+            icon={<ChevronRightRegular />}
+            iconPosition="after"
+            onClick={() => {
+              if (isTutorialModel) {
+                tutorialStore.goToStage("evaluation");
+                navigate(ROUTES.EVALUATION.CREATE);
+              } else {
+                navigate(ROUTES.EVALUATION.ROOT);
+              }
+            }}
+          >
+            空き家推定へ進む
+          </Button>
         </div>
       </div>
     </div>

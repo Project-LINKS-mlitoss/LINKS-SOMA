@@ -11,9 +11,15 @@
 
 .header {
   background-color: #1b8c631f;
-  padding: 20px 16px 12px;
+  padding: 18px 16px 0;
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+}
+
+.headerMain {
+  display: flex;
+  gap: 10px;
+  padding-bottom: 12px;
 }
 
 .circleIcon {
@@ -31,14 +37,79 @@
   color: #8a8a8a;
 }
 
+.headerBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.headerTop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .predictedProbability {
   font-size: 20px;
   font-weight: bold;
 }
 
+/* 推定基準日（年度）。多年度でこの確率がどの年のものか示す。ピルで定義を与える */
+.referenceYear {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background-color: rgba(0, 0, 0, 0.05);
+  font-size: 11px;
+  font-weight: 600;
+  color: #5a5a5a;
+}
+
 .address {
+  margin-top: 2px;
   color: #666;
   font-size: 12px;
+}
+
+/* 空き家推定確率の年度間変化率。識別情報とヘアラインで区切り、独立した帯にする */
+.changeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  padding: 8px 0 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.changeItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.changeLabel {
+  color: #8a8a8a;
+  font-size: 11px;
+}
+
+.changeValue {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 上昇 = 空き家化の進行。色付きテキストで控えめに強調する（塗りは強すぎる） */
+.changeUp {
+  color: #c50f1f;
+}
+
+/* 下降・横ばいは中立。方向は符号で示し色に依存させない */
+.changeDown {
+  color: #616161;
+}
+
+.changeFlat {
+  color: #8a8a8a;
+  font-weight: 500;
 }
 
 .info {
@@ -100,33 +171,6 @@
 
 .buildingIcon {
   background-color: #df7324;
-}
-
-.low {
-  color: #1b8c63;
-  background-color: #1b8c631f;
-}
-
-.low > span {
-  background-color: #1b8c63;
-}
-
-.medium {
-  color: #ffa929;
-  background-color: #ffa9291f;
-}
-
-.medium > span {
-  background-color: #ffa929;
-}
-
-.high {
-  color: #c4314b;
-  background-color: #c4314b1f;
-}
-
-.high > span {
-  background-color: #c4314b;
 }
 
 /* 全項目表示モード用のスタイル */
@@ -317,7 +361,9 @@
   white-space: nowrap;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
   z-index: 1000;
   pointer-events: none;
 }
@@ -332,7 +378,9 @@
   border-top-color: #424242;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
+  transition:
+    opacity 0.2s ease,
+    visibility 0.2s ease;
   z-index: 1000;
   pointer-events: none;
 }

@@ -3,9 +3,10 @@
  */
 
 import { useCallback, useMemo, useState } from "react";
+import { type NormalizationPurpose } from "../../hooks/use-form-normalization";
 import {
-  WIZARD_STEPS,
   TOTAL_STEPS,
+  buildWizardSteps,
   type WizardStepConfig,
 } from "./wizard-steps";
 
@@ -14,6 +15,8 @@ type UseWizardStateProps = {
   initialStep?: number;
   /** 初期手動スキップ状態（下書き再開時） */
   initialManuallySkippedSteps?: number[];
+  /** 名寄せの目的。必須性・説明文の出し分けに使う */
+  purpose: NormalizationPurpose;
 };
 
 type UseWizardStateReturn = {
@@ -53,11 +56,23 @@ type UseWizardStateReturn = {
 export const useWizardState = ({
   initialStep = 0,
   initialManuallySkippedSteps,
+  purpose,
 }: UseWizardStateProps): UseWizardStateReturn => {
   const [currentStep, setCurrentStep] = useState(initialStep);
   const [manuallySkippedSteps, setManuallySkippedSteps] = useState<Set<number>>(
     () => new Set(initialManuallySkippedSteps ?? []),
   );
+
+  // 目的で並びが変わるとスキップのインデックスが無効になるため、変更時にリセットする。
+  // （render 中の state 調整。React 推奨パターン: 派生 state のリセット）
+  const [prevPurpose, setPrevPurpose] = useState(purpose);
+  if (prevPurpose !== purpose) {
+    setPrevPurpose(purpose);
+    setManuallySkippedSteps(new Set());
+  }
+
+  // 目的で解決・並べ替えたステップ列（必須を先に提示）。
+  const steps = useMemo(() => buildWizardSteps(purpose), [purpose]);
 
   // 条件付き自動スキップの判定
   // 建物ポリゴンデータでPLATEAUを選択した場合のスキップ処理
@@ -76,7 +91,7 @@ export const useWizardState = ({
   }, [shouldSkipBuildingPolygon]);
 
   // 現在のステップ設定
-  const currentStepConfig = WIZARD_STEPS[currentStep];
+  const currentStepConfig = steps[currentStep];
 
   // 有効なステップ数と現在位置の計算（自動スキップを除外）
   const { effectiveSteps, effectiveCurrentStep } = useMemo(() => {

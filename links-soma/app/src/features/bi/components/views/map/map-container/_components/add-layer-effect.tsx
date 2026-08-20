@@ -1,11 +1,7 @@
 import type * as maplibregl from "maplibre-gl";
 import { rendererLogger } from "../../../../../../../shared/utils/renderer-logger";
-import {
-  LAYER_SUFFIXES,
-  MAP_EVENTS,
-  OVERLAP_NAVIGATION,
-  PREDICTED_PROBABILITY,
-} from "../const";
+import { LAYER_SUFFIXES, MAP_EVENTS, OVERLAP_NAVIGATION } from "../const";
+import { getGradientStops } from "../../../../../util/map/layer-styles";
 import { type FeatureData } from "../../../../../types";
 import {
   type GetFeatureById,
@@ -19,11 +15,10 @@ import {
   createOverlapOutlineLayerObject,
   createOverlapPointLayerObject,
   parseOverlapIds,
+  resolveColorProperty,
+  type MapColorColumn,
 } from "../../../../../util/map";
-import {
-  type ThresholdValue,
-  getAreaPredictedProbabilityColumn,
-} from "../../../../../util/threshold-column-utils";
+import { type ThresholdValue } from "../../../../../util/threshold-column-utils";
 
 type Params = {
   map: maplibregl.Map;
@@ -34,6 +29,10 @@ type Params = {
   getFeatureById: GetFeatureById;
   /** 閾値設定（地域単位の色分けに使用） */
   threshold?: ThresholdValue;
+  /** スライダー目盛り上限。色グラデーションの境界をデータ分布に合わせるのに使う */
+  domainMax: number;
+  /** 色分けに使うカラム。未指定なら閾値から確率カラムを決める */
+  colorColumn?: MapColorColumn;
 };
 
 /** イベントリスナーのクリーンアップ関数の型 */
@@ -144,6 +143,8 @@ export function addLayerEffect({
   unit,
   getFeatureById,
   threshold,
+  domainMax,
+  colorColumn,
 }: Params): EventListenerCleanupFunction {
   try {
     // 既存のPOINT、POLYGON、重複レイヤーをクリーンアップ（防御的コード）
@@ -192,15 +193,12 @@ export function addLayerEffect({
     // フィーチャーをタイプ別に分離
     const { pointFeatures, polygonFeatures } = separateFeaturesByType(features);
 
-    const { medium, high } = PREDICTED_PROBABILITY[unit];
+    const { medium, high } = getGradientStops(domainMax);
     const cleanupFunctions: (() => void)[] = [];
 
-    // 閾値に基づく色分けプロパティ名の決定
-    // 地域単位で閾値が設定されている場合は predicted_probability_XX を使用
-    const colorPropertyName =
-      unit === "area" && threshold !== undefined
-        ? getAreaPredictedProbabilityColumn(threshold)
-        : "predicted_probability";
+    // 色分けに使うカラムと配色を決定する（確率／変化率、地域単位の閾値カラム）
+    const { propertyName: colorPropertyName, metric: colorMetric } =
+      resolveColorProperty(colorColumn ?? "probability", unit, threshold);
 
     // POLYGONレイヤーの追加
     if (polygonFeatures.length > 0) {
@@ -218,6 +216,7 @@ export function addLayerEffect({
         { medium, high },
         colorPropertyName,
         unit,
+        colorMetric,
       );
       map.addLayer(polygonLayerObject);
 
@@ -300,6 +299,7 @@ export function addLayerEffect({
         layerId,
         { medium, high },
         colorPropertyName,
+        colorMetric,
       );
       map.addLayer(pointLayerObject);
 

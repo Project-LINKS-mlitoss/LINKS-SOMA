@@ -1,14 +1,22 @@
 import { useForm, type UseFormReturn } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { DEFAULT_EXPLANATORY_COLUMNS } from "../constants";
+import {
+  DEFAULT_EXPLANATORY_COLUMNS,
+  FIXED_MODEL_ADVANCED,
+} from "../constants";
+import { lang } from "../../../shared/config/lang";
+
+const validation = lang.pages["model/create"].validation;
 
 export const schema = z.object({
-  input_path: z.string({ required_error: "必須" }),
+  // 未選択時は空文字を渡すため required_error では足りず、.min(1) で直接弾く。
+  input_path: z.string().min(1, validation.datasetRequired),
   settings: z.object({
     explanatory_variables: z
-      .array(z.string(), { required_error: "必須" })
-      .min(1, { message: "必須" }),
+      .array(z.string())
+      .min(1, validation.explanatoryVariablesRequired),
+    // IF002 へ渡すハイパーパラメータ。値はユーザー入力ではなく FIXED_MODEL_ADVANCED 固定
     advanced: z.object({
       test_size: z.coerce.number().optional(),
       n_splits: z.coerce.number().optional(),
@@ -39,22 +47,7 @@ export const useFormModelCreate = (): UseFormReturn<FormType> => {
     defaultValues: {
       settings: {
         explanatory_variables: [],
-        advanced: {
-          test_size: 0.3,
-          n_splits: 3,
-          undersample: false,
-          undersample_ratio: 3.0,
-          threshold: 0.3,
-          hyperparameter_flag: false,
-          n_trials: 100,
-          lambda_l1: 0,
-          lambda_l2: 0,
-          num_leaves: 31,
-          feature_fraction: 1.0,
-          bagging_fraction: 1.0,
-          bagging_freq: 0,
-          min_data_in_leaf: 20,
-        },
+        advanced: FIXED_MODEL_ADVANCED,
       },
     },
     resolver: zodResolver(schema),

@@ -100,9 +100,9 @@ test.describe("名寄せ → モデル構築", () => {
 
     expect(finalStatus).toBe("complete");
 
-    // 結合率検証: 住基(juki) + ジオコーディング(geo) = 2件想定
+    // 結合率検証: 住基(juki) + ジオコーディング(geo) + 空き家調査結果(vacant_house) = 3件想定（#1775）
     await verifyNormalizationJoiningRates(page, {
-      expectedJoinSteps: 2,
+      expectedJoinSteps: 3,
       label: "名寄せ（モデル構築用）",
     });
   });

@@ -25,12 +25,20 @@ import {
 import { type MouseEvent, useRef, useState } from "react";
 import { Button } from "../../../../shared/components/ui/button";
 import { type SelectNormalizedDataSet } from "../../../../db/schema";
+import { lang } from "../../../../shared/config/lang";
+import { normalizationPurposeLabel } from "../../../../shared/config/normalization-purpose-label";
 import { useFetchNormalizedDatasets } from "../../hooks/use-fetch-normalized-datasets";
 import { formatDate } from "../../../../shared/utils/format-date";
 import { useDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { downloadDataSetFile } from "../../../../shared/utils/download-data-set-file";
+import {
+  toDisplayHeaderLine,
+  translateCsvHeaderParts,
+} from "../../../../shared/utils/normalized-csv-header";
 import { rendererLogger } from "../../../../shared/utils/renderer-logger";
 import { handleUpload, handleUploadButtonClick } from "../../pages/_util";
+import { detectNonUtf8Files } from "../../../../shared/utils/detect-non-utf8-files";
+import { EncodingWarning } from "../../../../shared/components/encoding-warning";
 import { DataPreviewDialog } from "./data-preview-dialog";
 import { EditNameDialog } from "./edit-name-dialog";
 import { DeleteDataSetRowDialog } from "./delete-dataset-row-dialog";
@@ -89,6 +97,7 @@ export function NormalizedDataSetTable(): JSX.Element {
   const styles = useStyles();
 
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [nonUtf8Files, setNonUtf8Files] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDeleteSelectedItems = async (): Promise<void> => {
@@ -113,6 +122,7 @@ export function NormalizedDataSetTable(): JSX.Element {
 
   const columns = [
     createTableColumn<SelectNormalizedDataSet>({ columnId: "name" }),
+    createTableColumn<SelectNormalizedDataSet>({ columnId: "purpose" }),
     createTableColumn<SelectNormalizedDataSet>({ columnId: "date" }),
   ];
   const { data, mutate } = useFetchNormalizedDatasets();
@@ -186,9 +196,12 @@ export function NormalizedDataSetTable(): JSX.Element {
           <input
             ref={fileInputRef}
             multiple
-            onChange={async (e) =>
-              handleUpload(e, "normalization").then(() => mutate())
-            }
+            onChange={async (e) => {
+              // PV-01 文字コード: 非UTF-8 を非ブロッキングで注意（保存は止めない）。
+              setNonUtf8Files(await detectNonUtf8Files(e.target.files ?? []));
+              await handleUpload(e, "normalization");
+              await mutate();
+            }}
             style={{ display: "none" }}
             type="file"
           />
@@ -213,6 +226,7 @@ export function NormalizedDataSetTable(): JSX.Element {
           />
         </div>
       </div>
+      <EncodingWarning fileNames={nonUtf8Files} />
       <div className={styles.datasetList}>
         <Table>
           <TableHeader className={styles.tableHeader}>
@@ -223,6 +237,9 @@ export function NormalizedDataSetTable(): JSX.Element {
                 onClick={handleToggleAll}
               />
               <TableHeaderCell>データセット名</TableHeaderCell>
+              <TableHeaderCell>
+                {lang.components.normalizationPurpose.fieldLabel}
+              </TableHeaderCell>
               <TableHeaderCell>アップロード日時</TableHeaderCell>
               <TableHeaderCell></TableHeaderCell>
             </TableRow>
@@ -279,7 +296,13 @@ function Row({
         ext && !fileName.toLowerCase().endsWith(ext.toLowerCase())
           ? `${fileName}${ext}`
           : fileName;
-      void downloadDataSetFile(buffer, downloadName);
+      // 一部の列名がディスク上で英語のまま残るため、渡す直前に表示名へ読み替える（ADR-0029）。
+      // アップロード側（save-data-set-file.ts）の逆変換と対で維持すること
+      const downloadParts =
+        ext.toLowerCase() === ".csv"
+          ? translateCsvHeaderParts(buffer, toDisplayHeaderLine)
+          : [buffer];
+      void downloadDataSetFile(downloadParts, downloadName);
     } catch (error) {
       rendererLogger.error("Failed to download normalized dataset", {
         error,
@@ -307,6 +330,7 @@ function Row({
           dialogState={dataPreviewDialogState}
         />
       </TableCell>
+      <TableCell>{normalizationPurposeLabel(item.purpose, true)}</TableCell>
       <TableCell>{formatDate(item.updated_at, "YYYY/MM/DD HH:mm")}</TableCell>
       <TableCell className={styles.cellActions}>
         <Button

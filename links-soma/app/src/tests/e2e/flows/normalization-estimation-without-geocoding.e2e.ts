@@ -7,7 +7,11 @@
  *
  * 検証内容:
  * 1. 名寄せ処理: ジオコーディングなしでもE016スキップで正常完了
- * 2. 空き家推定: ジオコーディングなしの名寄せ結果でもIF003/E032が正常動作
+ * 2. 推定画面: ジオコーディングを使っていない名寄せデータでは地域集計フォームが非表示（#1924）
+ * 3. 空き家推定: 地域集計データなしでもIF003が正常完了（E032はスキップ）
+ * 4. 地域集計がスキップされ地域行（data_set_detail_areas）が生成されないこと:
+ *    - area単位・building単位とも地域フィルター候補は空
+ *    "ジオメトリ源を持たない名寄せデータで地域集計フォームを出さない" 挙動を UI 経路で固定する
  *
  * 実行方法:
  * cd app && npm run e2e -- normalization-estimation-without-geocoding
@@ -37,6 +41,7 @@ import {
   saveJobResult,
   verifyNormalizationJoiningRates,
   verifyEstimationResultCount,
+  fetchAreaGroups,
 } from "../../helpers/job-operations";
 import {
   navigateAndStartAction,
@@ -78,15 +83,13 @@ test.describe("ジオコーディングなし名寄せ・推定処理", () => {
 
     // preprocess は wizard intro で createDraftJob により draft が事前作成され、
     // execE001 は jobId 付き update パスを通る。よって URL hash からの抽出で jobId を確定する
-    const { newJobId: preprocessJobId } = await startPipelineAndNavigateToStatus(
-      page,
-      {
+    const { newJobId: preprocessJobId } =
+      await startPipelineAndNavigateToStatus(page, {
         startButton: "開始する",
         confirmMessage: "データ名寄せ処理を開始しました",
         statusHashIncludes: "normalization",
         draftUrlPathSegment: "normalization",
-      },
-    );
+      });
     if (preprocessJobId === undefined) {
       throw new Error("preprocess jobId が確定していません");
     }
@@ -123,10 +126,14 @@ test.describe("ジオコーディングなし名寄せ・推定処理", () => {
       createHashIncludes: "evaluation/create",
     });
 
-    await fillEstimationForm(page, { datasetName: SAVED_DATASET_NAME });
+    // ジオコーディングを使っていない名寄せデータ。地域集計フォームは非表示になる（#1924）
+    await fillEstimationForm(page, {
+      datasetName: SAVED_DATASET_NAME,
+      skipAreaGrouping: true,
+    });
 
     await startPipelineAndNavigateToStatus(page, {
-      startButton: "分析開始",
+      startButton: "推定開始",
       confirmMessage: "分析を開始しました",
       statusHashIncludes: "evaluation",
       createHashExcludes: "create",
@@ -140,8 +147,30 @@ test.describe("ジオコーディングなし名寄せ・推定処理", () => {
     expect(finalStatus).toBe("complete");
 
     // 推定結果件数検証: complete でも0件出力されていないか
-    await verifyEstimationResultCount(page, {
+    const { resultId } = await verifyEstimationResultCount(page, {
       label: "推定（ジオコーディングなし）",
     });
+
+    // 地域集計フォームを出さず送信したため E032 はスキップされ、地域行は生成されない。
+    // area単位・building単位とも地域フィルター候補は空になる（このフローの核となる回帰ガード）。
+    const areaUnitGroups = await fetchAreaGroups(page, resultId, "area");
+    // eslint-disable-next-line no-console -- E2Eテストの進捗表示
+    console.log(
+      `📊 [推定（ジオコーディングなし）] area単位 地域候補=${areaUnitGroups.length}件（地域集計スキップで0想定）`,
+    );
+    expect(
+      areaUnitGroups.length,
+      "地域集計がスキップされ data_set_detail_areas は空。area単位の地域候補も空（#1924）",
+    ).toBe(0);
+
+    const buildingUnitGroups = await fetchAreaGroups(
+      page,
+      resultId,
+      "building",
+    );
+    expect(
+      buildingUnitGroups.length,
+      "building単位の地域候補は建物geometry依存。ジオコーディングなしでは空であること（#1878/#1887）",
+    ).toBe(0);
   });
 });

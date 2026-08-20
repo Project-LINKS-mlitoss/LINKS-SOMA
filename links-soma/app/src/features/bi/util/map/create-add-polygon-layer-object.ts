@@ -2,8 +2,10 @@ import { type AddLayerObject, type FilterSpecification } from "maplibre-gl";
 import { LAYER_SUFFIXES } from "../../components/views/map/map-container/const";
 import {
   LAYER_COLORS,
-  createColorExpression,
+  createColorExpressionForMetric,
+  createOutlineColorForMetric,
   createClickedStateExpression,
+  type MapColorMetric,
 } from "./layer-styles";
 
 /**
@@ -12,12 +14,14 @@ import {
  * @param predictedProbability 色分けのしきい値
  * @param colorPropertyName 色分けに使用するプロパティ名（デフォルト: predicted_probability）
  * @param unit 表示単位（building/area）- 建物は透過なし、地域は透過あり
+ * @param colorMetric 色分けが表す指標（確率／変化率）
  */
 export const createAddPolygonLayerObject = (
   layerId: string,
   predictedProbability: { medium: number; high: number },
   colorPropertyName = "predicted_probability",
   unit: "building" | "area" = "building",
+  colorMetric: MapColorMetric = "probability",
 ): AddLayerObject => ({
   id: `${layerId}${LAYER_SUFFIXES.POLYGONS}`,
   type: "fill",
@@ -25,18 +29,20 @@ export const createAddPolygonLayerObject = (
   maxzoom: 22,
   minzoom: 8,
   paint: {
-    "fill-color": createColorExpression(
-      predictedProbability,
+    "fill-color": createColorExpressionForMetric(
+      colorMetric,
       colorPropertyName,
+      predictedProbability,
     ),
     // 建物: 透過なし（濃淡問題対策）、地域: 透過あり（通常時0.4、クリック時0.8）
     "fill-opacity":
       unit === "building"
         ? createClickedStateExpression(1.0, 1.0)
         : createClickedStateExpression(0.8, 0.4),
-    "fill-outline-color": createColorExpression(
-      predictedProbability,
+    "fill-outline-color": createOutlineColorForMetric(
+      colorMetric,
       colorPropertyName,
+      predictedProbability,
     ),
   },
 });

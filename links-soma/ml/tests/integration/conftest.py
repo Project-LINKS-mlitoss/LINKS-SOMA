@@ -72,7 +72,18 @@ def test_db(tmp_path):
             lat_geocoding REAL,
             lon_geocoding REAL,
             normalized_address TEXT,
-            bldg_geometry TEXT
+            bldg_geometry TEXT,
+            area_group TEXT,
+            key_code TEXT,
+            predicted_probability_change_rate_from_oldest REAL,
+            predicted_probability_change_rate_from_previous REAL,
+            residence_id TEXT,
+            is_vacant INTEGER,
+            vacant_type TEXT,
+            vacant_source TEXT,
+            vacant_year TEXT,
+            address_precision_flag INTEGER,
+            optional_data_source TEXT
         )
     """)
     cursor.execute("""
@@ -84,6 +95,36 @@ def test_db(tmp_path):
             predicted_probability REAL,
             area_group TEXT,
             geometry TEXT
+        )
+    """)
+    # 登録データセット。エラー文面へ登録ファイル名（file_name）を添える際、IF001 が
+    # payload の path（=file_path）をキーに引く（app 側 raw_data_sets のサブセット）。
+    cursor.execute("""
+        CREATE TABLE raw_data_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL
+        )
+    """)
+    # 名寄せ済みデータセット。推定(IF003)のエラーに対象データ名を添える際に file_path で引く。
+    cursor.execute("""
+        CREATE TABLE normalized_data_sets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL
+        )
+    """)
+    # 分析画面のビュー。データ出力(IF004)を view_id 付きで呼ぶと parameters の
+    # 表示項目が SELECT 句になる（app 側 result_views のサブセット）。
+    cursor.execute("""
+        CREATE TABLE result_views (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sheet_id INTEGER,
+            data_set_result_id INTEGER,
+            title TEXT,
+            unit TEXT,
+            style TEXT,
+            parameters TEXT
         )
     """)
     conn.commit()

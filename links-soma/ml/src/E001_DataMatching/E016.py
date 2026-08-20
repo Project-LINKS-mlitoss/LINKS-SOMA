@@ -16,6 +16,7 @@ import json
 import math
 import os
 import random
+import re
 import string
 import sys
 import uuid
@@ -45,10 +46,12 @@ async_tasks_path = os.path.join(current_dir, "..", "async_tasks")
 if async_tasks_path not in sys.path:
     sys.path.append(async_tasks_path)
 
+# utils / constants と E012 は探索できるディレクトリが違うため、import を分ける。
+# 1つの try にまとめると E012 の失敗で utils まで別経路へ倒れ、DB接続を持たない
+# async_tasks.utils が束縛されて CSV 方式の建物種別判定が落ちる（issue #1966）。
 try:
     from utils import *
     from constants import *
-    from E012 import normalize_address_full
 except ImportError:
     sys.path.remove(async_tasks_path)
     sys.path.append(
@@ -56,6 +59,10 @@ except ImportError:
     )
     from async_tasks.utils import *
     from async_tasks.constants import *
+
+try:
+    from E012 import normalize_address_full
+except ImportError:
     from src.E001_DataMatching.E012 import normalize_address_full
 
 pd.set_option("display.max_columns", None)
@@ -1048,6 +1055,47 @@ def _drop_z(geom):
         return geom
 
 
+# 重心バッファの半径を決める倍率。建物ポリゴン結合と家屋種別判定で同じ値を使う
+BUILDING_BUFFER_MUL = 2
+
+# 重心バッファの対象から外す建物の面積(m2)。半径は面積に比例して広がるため、
+# 工場等の大きな建物のバッファは離れた無関係な点まで拾ってしまう
+BUILDING_AREA_LIMIT = 10000
+
+# 建物と点を重ねるときの座標系。面積と半径をメートルで扱うため投影座標系を使う
+BUILDING_MATCH_CRS = 6675
+
+
+def build_building_buffers(buildings_gdf, mul=BUILDING_BUFFER_MUL):
+    """建物を重心中心の円に置き換えた GeoDataFrame を返す。
+
+    住所から作った座標は建物の輪郭に収まるとは限らず、輪郭への内包判定では
+    取りこぼす。建物を面積相当の円に広げてから重ねることでこのずれを吸収する。
+    吸収できるずれは建物の大きさに比例し、面積 A の建物では重心から
+    sqrt(mul * A / pi) メートルまで。
+
+    地図表示の建物割り当て(assign_points_to_buildings)と家屋種別の判定
+    (IF001.e015)は同じ建物データに同じ点を当てる。規則が食い違うと、地図には
+    建物として出ているのに種別だけ判定できない行が生まれるため、両者はこの
+    関数を共有する。
+
+    前提: buildings_gdf は BUILDING_MATCH_CRS に変換済みであること。面積と
+    半径をメートルで計算するため、緯度経度のまま渡すと半径が度として
+    解釈される。
+
+    副作用: buildings_gdf に centroid・area 列を書き込む。建物データは数十万
+    行になるため複製せずに書き換える。呼び出し後も元の列構成が要る場合は
+    複製を渡すこと。
+    """
+    buildings_gdf["centroid"] = buildings_gdf["geometry"].centroid
+    buildings_gdf["area"] = buildings_gdf["geometry"].area
+    buildings_gdf = buildings_gdf[buildings_gdf["area"] < BUILDING_AREA_LIMIT]
+
+    rad = (mul * buildings_gdf["area"] / math.pi) ** 0.5
+    buildings_gdf["buffer"] = buildings_gdf["centroid"].buffer(rad)
+    return buildings_gdf.set_geometry("buffer")
+
+
 def assign_polygon_to_points(
     buildings_gdf, points_gdf, mul, point_selected_column, option
 ):
@@ -1102,23 +1150,7 @@ def assign_polygon_to_points(
                 buildings_gdf["geom_type"] != "Point"
             ].copy()
 
-        # バッファ作成の準備
-        # 重心の計算
-        buildings_gdf["centroid"] = buildings_gdf["geometry"].centroid
-        # 面積の計算
-        buildings_gdf["area"] = buildings_gdf["geometry"].area
-
-        # ここで面積の足切りを行う
-        # 工場等との結合が行われないようにするために1000m2以上のものは削除する
-        # 平面直角座標を用いて面積を取得しているのでそのまま足切りが行える
-        buildings_gdf = buildings_gdf[buildings_gdf["area"] < 10000]
-
-        # 重心から面積と同サイズのバッファを生成
-        rad = (mul * buildings_gdf["area"] / math.pi) ** 0.5
-
-        # bufferをgeometryにする（空間結合の準備）
-        buildings_gdf["buffer"] = buildings_gdf["centroid"].buffer(rad)
-        buildings_gdf = buildings_gdf.set_geometry("buffer")
+        buildings_gdf = build_building_buffers(buildings_gdf, mul)
 
         # Remove temporary geom_type column (only if it exists)
         if option != 1:
@@ -1415,6 +1447,105 @@ def add_residenceID(gdf):
     return gdf
 
 
+def _is_readable_japanese(value) -> bool:
+    """
+    国勢調査ポリゴンの S_NAME 値が「可読な日本語」かどうかを判定する。
+
+    GDAL/fiona は誤ったエンコーディングで .dbf を読んでも例外を出さず、
+    生バイトを hex 文字列にしたり U+FFFD 置換文字を含む文字列を黙って返すことがある
+    （SJIS 境界データで .cpg が無い場合に発生。GDAL バージョン差で崩れ方が変わる）。
+    そのため「読めた文字列が妥当な日本語か」を内容で検証する。
+
+    Parameters
+    ----------
+    value : Any
+        判定対象の S_NAME 値
+
+    Returns
+    -------
+    bool
+        CJK 文字を含み、置換文字・hex 様文字列でなければ True
+    """
+    if not isinstance(value, str) or value == "":
+        return False
+    # U+FFFD（置換文字）を含む = デコード失敗
+    if "�" in value:
+        return False
+    # 生バイトを hex 化したような文字列（例: "8adb82cc93e088ea"）を除外
+    if re.fullmatch(r"[0-9a-fA-F]{6,}", value):
+        return False
+    # ひらがな・カタカナ・CJK統合漢字・互換漢字のいずれかを含むか
+    cjk_pattern = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿]")
+    return bool(cjk_pattern.search(value))
+
+
+def read_boundary_polygon(gpkg_path):
+    """
+    国勢調査の境界ポリゴン（GeoPackage / Shapefile）を読み込む。
+
+    属性テーブル（.dbf）が Shift-JIS(cp932) で .cpg が無いケースに対応するため、
+    「複数エンコーディングで読み取り → S_NAME が可読日本語か検証 → 妥当な結果を採用」
+    という検出＋検証＋フォールバック方式をとる。cp932 を無条件ハードコードはしない
+    （正当に UTF-8 や .cpg 付きの境界データもあるため）。
+
+    Parameters
+    ----------
+    gpkg_path : str
+        境界ポリゴンのパス（.gpkg / .shp 等）
+
+    Returns
+    -------
+    GeoDataFrame
+        読み込んだ境界ポリゴン
+    """
+    # 試行順: chardet 推定 → UTF-8 系 → 日本語系 → GDAL のデフォルト（.cpg / GPKG 用）
+    candidate_encodings = []
+    try:
+        detected = detect_encoding(gpkg_path)
+    except Exception:
+        detected = None
+    if detected:
+        candidate_encodings.append(detected)
+    for enc in ["utf-8", "cp932", "shift_jis", "euc_jp"]:
+        if enc not in candidate_encodings:
+            candidate_encodings.append(enc)
+    # None = SHAPE_ENCODING を上書きしない（.cpg 付き・GeoPackage はこれで正しく読める）
+    candidate_encodings.append(None)
+
+    last_gdf = None
+    for enc in candidate_encodings:
+        try:
+            if enc is None:
+                gdf = gpd.read_file(gpkg_path)
+            else:
+                with fiona.Env(SHAPE_ENCODING=enc):
+                    gdf = gpd.read_file(gpkg_path)
+        except Exception:
+            continue
+
+        last_gdf = gdf
+        # S_NAME が無い境界データはここで検証できないため、最初に読めたものを採用
+        if "S_NAME" not in gdf.columns:
+            return gdf
+
+        sample = gdf["S_NAME"].dropna().head(50)
+        if len(sample) == 0:
+            # 名称が全て NULL の場合は検証不能。読めた結果をそのまま採用
+            return gdf
+        if sample.map(_is_readable_japanese).any():
+            return gdf
+
+    # どのエンコーディングでも可読日本語にならなかった場合は、
+    # 最後に読めた結果を返す（読み込み自体が成功していれば後続処理は継続できる）
+    if last_gdf is not None:
+        return last_gdf
+
+    set_error(ERROR_00044)
+    raise ValueError(
+        f"国勢調査ポリゴンの読み込みに失敗しました: {gpkg_path}"
+    )
+
+
 def add_keycode(gdf, gpkg_path):
     """
     出力するデータに地域コードと町丁字名の付与を行う
@@ -1424,7 +1555,7 @@ def add_keycode(gdf, gpkg_path):
         shp (polygon): 国勢調査の町丁字ポリゴンデータ(現状はgpkg形式で対応)
     """
     try:
-        shp = gpd.read_file(gpkg_path)
+        shp = read_boundary_polygon(gpkg_path)
         shp = shp.to_crs(epsg=4326)
     except Exception as e:
         set_error(ERROR_00044)
@@ -1610,7 +1741,7 @@ def process_spatial_join(
         # 建物データと水道データを結合
         try:
             result, join_ratio, success_rate = assign_polygon_to_points(
-                polygon, point, 2, point_selected_column, option
+                polygon, point, BUILDING_BUFFER_MUL, point_selected_column, option
             )
         except Exception as e:
             set_error(ERROR_00031)
@@ -1792,23 +1923,7 @@ def assign_points_to_buildings(
     points_with_null_geom = points_gdf[points_gdf["geometry"].isnull()].copy()
     points_gdf = points_gdf[points_gdf["geometry"].notnull()].copy()
 
-    # バッファ作成の準備
-    # 重心の計算
-    buildings_gdf["centroid"] = buildings_gdf["geometry"].centroid
-    # 面積の計算
-    buildings_gdf["area"] = buildings_gdf["geometry"].area
-
-    # ここで面積の足切りを行う
-    # 工場等との結合が行われないようにするために1000m2以上のものは削除する
-    # 平面直角座標を用いて面積を取得しているのでそのまま足切りが行える
-    buildings_gdf = buildings_gdf[buildings_gdf["area"] < 10000]
-
-    # 重心から面積と同サイズのバッファを生成
-    rad = (mul * buildings_gdf["area"] / math.pi) ** 0.5
-
-    # bufferをgeometryにする（空間結合の準備）
-    buildings_gdf["buffer"] = buildings_gdf["centroid"].buffer(rad)
-    buildings_gdf = buildings_gdf.set_geometry("buffer")
+    buildings_gdf = build_building_buffers(buildings_gdf, mul)
 
     # points_gdfにID付与（空間結合後の重複削除のために、重心との距離計算をするための準備）
     points_gdf["ID"] = range(1, len(points_gdf) + 1)
@@ -2294,6 +2409,9 @@ def process_data(
     municipality=None,
 ):
     logger = None
+    # task_id は except でも参照する。try の内側で束縛すると、ロガー初期化や接続で
+    # 失敗したときに except 自身が UnboundLocalError で落ち、エラーを記録できなくなる。
+    task_id = None
     try:
         if logs_dir:
             logger = get_rotating_logger(logs_dir, logger_name="E016")
@@ -2302,7 +2420,6 @@ def process_data(
             logger = get_rotating_logger(logs_dir, logger_name="E016")
         if db_path:
             connect_sqllite(db_path)
-        task_id = None
         if job_id:
             task_id = create_or_update_job_task(
                 job_id,
@@ -2321,7 +2438,7 @@ def process_data(
             # === 建物ポリゴンあり: 空間結合を実行 ===
             try:
                 tatemono, crs = load_and_process_data(
-                    tatemono_path, 6675, geometry, file_type, data_type, columns
+                    tatemono_path, BUILDING_MATCH_CRS, geometry, file_type, data_type, columns
                 )
                 if "fid" not in tatemono.columns:
                     tatemono["fid"] = range(1, len(tatemono) + 1)
@@ -2352,7 +2469,7 @@ def process_data(
 
             try:
                 tatemono_use_point, join_ratio, success_rate, result_summarization_updated = assign_points_to_buildings(
-                    tatemono, e14_merged, 2, crs, point_selected_column, option, job_id, task_id_summarization, result_summarization
+                    tatemono, e14_merged, BUILDING_BUFFER_MUL, crs, point_selected_column, option, job_id, task_id_summarization, result_summarization
                 )
             except Exception as e:
                 traceback.print_exc()
@@ -2476,18 +2593,27 @@ def process_data(
                 result=None,
                 id=task_id,
             )
-        # 地域コードと町丁字名の付与
-        try:
-            tatemono_use_point_add_keycode = add_keycode(
-                tatemono_use_point, gpkg_path
-            )
-        except Exception as e:
-            if ERROR_CODE is None:
-                set_error(ERROR_00034)
-                raise Exception(
-                    f"建物ポリゴンデータもしくは国勢調査データのジオメトリが不正なため、エラーが発生しました。"
+        # 地域コードと町丁字名の付与。
+        # 国勢調査データ未指定時は KEY_CODE/S_NAME を空列で補完する
+        # （地域集計は推定側 E032 が area_grouping ポリゴンで再結合するため、
+        # 名寄せ出力の KEY_CODE/S_NAME は後方互換目的の空列で足りる）。
+        if gpkg_path:
+            try:
+                tatemono_use_point_add_keycode = add_keycode(
+                    tatemono_use_point, gpkg_path
                 )
-            raise Exception(e)
+            except Exception as e:
+                if ERROR_CODE is None:
+                    set_error(ERROR_00034)
+                    raise Exception(
+                        f"建物ポリゴンデータもしくは国勢調査データのジオメトリが不正なため、エラーが発生しました。"
+                    )
+                raise Exception(e)
+        else:
+            tatemono_use_point_add_keycode = tatemono_use_point
+            for col in ("KEY_CODE", "S_NAME"):
+                if col not in tatemono_use_point_add_keycode.columns:
+                    tatemono_use_point_add_keycode[col] = None
 
 
         # 結果を保存
@@ -2527,6 +2653,11 @@ def process_data(
     except Exception as e:
         if logger:
             logger.error("E016 failed:\n%s", traceback.format_exc())
+        # 記録より先にフォールバック(E-0019)を立てる。順序が逆だと想定外の例外で
+        # ERROR_MSG が None のまま記録され、画面が原因を示せなくなる。
+        is_fallback = ERROR_CODE is None
+        if is_fallback:
+            set_error(ERROR_00019)
         if task_id is not None:
             create_or_update_job_task(
                 job_id,
@@ -2538,8 +2669,7 @@ def process_data(
                 id=task_id,
                 is_finish=True,
             )
-        if ERROR_CODE is None:
-            set_error(ERROR_00019)
+        if is_fallback:
             raise Exception(
                 "空間結合処理中にエラーが発生しました。ジオメトリに不正がないか、ご確認ください。"
             )

@@ -109,9 +109,9 @@ test.describe("全データセット名寄せ・推定処理", () => {
 
     expect(finalStatus).toBe("complete");
 
-    // 結合率検証: 住基(juki) + ジオコーディング(geo) = 2件想定
+    // 結合率検証: 住基(juki) + ジオコーディング(geo) + 空き家調査結果(vacant_house) = 3件想定（#1775）
     await verifyNormalizationJoiningRates(page, {
-      expectedJoinSteps: 2,
+      expectedJoinSteps: 3,
       label: "名寄せ（フルデータ）",
     });
   });
@@ -199,11 +199,11 @@ test.describe("全データセット名寄せ・推定処理", () => {
       modelName: savedModelName,
     });
 
-    // 分析開始（snapshot 差分で新規 result jobId を確定する）
+    // 推定開始（snapshot 差分で新規 result jobId を確定する）
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

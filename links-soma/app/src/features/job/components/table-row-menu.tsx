@@ -14,6 +14,7 @@ import {
   type JobType,
   TYPE_DISPLAY_MAP,
 } from "../../../shared/config/job-type-display-map";
+import { useGuideEndGuard } from "../../../shared/tutorial/guide-end-guard";
 import { DialogDeleteJob } from "./dialog-delete-job";
 
 export function TableRowMenu({
@@ -25,6 +26,7 @@ export function TableRowMenu({
 }): JSX.Element {
   const navigator = useNavigate();
   const deleteDialogState = useDialogState(false);
+  const { requestGuarded, GuardDialog } = useGuideEndGuard();
   const itemName =
     item.type && TYPE_DISPLAY_MAP[item.type as JobType]
       ? TYPE_DISPLAY_MAP[item.type as JobType]
@@ -34,10 +36,13 @@ export function TableRowMenu({
 
   const handleConfirmDelete = async (id: number): Promise<void> => {
     if (!onDelete) return;
-    try {
-      await onDelete(id);
-    } finally {
-      deleteDialogState.setIsOpen(false);
+    deleteDialogState.setIsOpen(false);
+    const proceed = (): void => onDelete(id);
+    // 下書きがガイドに参照中なら、削除前にガイド終了を確認する。
+    if (isDraft) {
+      await requestGuarded(id, proceed);
+    } else {
+      proceed();
     }
   };
 
@@ -77,6 +82,7 @@ export function TableRowMenu({
         id={item.id}
         onDelete={handleConfirmDelete}
       />
+      <GuardDialog />
     </>
   );
 }

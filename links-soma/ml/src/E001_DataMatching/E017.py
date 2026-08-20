@@ -40,6 +40,8 @@ FILE_NAME_JP = {
     "touki": "建物情報",
     "geocoding": "ジオコーディング済みデータ",
     "building_type_determination": "建物種別判定用データ",
+    "optional_data_source": "建物関連データ",
+    "vacant_house": "空き家調査結果",
 }
 
 # Mapping for target name in result
@@ -48,6 +50,8 @@ TARGET_NAME_MAP = {
     "touki": "building_registry",
     "geocoding": "geocoding",
     "building_type_determination": "building_type_determination",
+    "optional_data_source": "optional_data_source",
+    "vacant_house": "vacant_house",
 }
 
 

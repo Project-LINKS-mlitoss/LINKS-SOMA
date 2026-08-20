@@ -3,6 +3,7 @@ import {
   type BarView,
   type PieView,
 } from "../../types/models/view";
+import { resolveChartAggregation } from "../chart-aggregation";
 import { type CsvColumn, type CsvRow } from "./csv-generator";
 
 /**
@@ -114,9 +115,8 @@ export const transformPieChartData = (
   view: PieView,
   chartProps: ExportChartProps,
 ): { columns: CsvColumn[]; rows: CsvRow[] } => {
-  const groupAggregation = view.parameters.find(
-    (p) => p.type === "group_aggregation",
-  )?.value;
+  /** 未設定のビューでも取得側と同じ既定になるよう共通の解決関数を使う */
+  const groupAggregation = resolveChartAggregation(view.parameters, view.style);
 
   const columns: CsvColumn[] = [
     {

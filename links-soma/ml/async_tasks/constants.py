@@ -3,10 +3,6 @@ ERROR_00001 = {
     "code": "IF001_e012_err_export_encoding",
     "message": "ファイル {param_st1} を {param_st2} エンコーディングで保存中にエラーが発生しました。 [E-0001]"
 }
-ERROR_00002 = {
-    "code": "IF001_e012_err_export_all_encoding",
-    "message": "ファイル {param_st1} をいずれのエンコーディングでも保存できませんでした。 [E-0002]"
-}
 ERROR_00003 = {
     "code": "IF001_e012_err_import_format",
     "message": "対応していないファイル形式です。CSV形式（UTF-8 BOM付き）のファイルを入力してください。 [E-0003]"
@@ -19,10 +15,6 @@ ERROR_00005 = {
     "code": "IF001_e012_err_cleaning",
     "message": "インプットデータが本システムのマニュアルに記載された要件に沿って作成されているかをご確認ください。入力したインプットデータの住所カラムに記載された住所が正しい表記となっているかご確認ください。 [E-0005]"
 }
-ERROR_00006 = {
-    "code": "IF001_e013_err_import_format",
-    "message": "対応していないファイル形式です。CSV形式（UTF-8 BOM付き）のファイルを入力してください。 [E-0006]"
-}
 ERROR_00007 = {
     "code": "IF001_e013_err_file_loading",
     "message": "ファイルの読み込みに失敗しました。ファイルが破損していないか確認し、CSV形式（UTF-8 BOM付き）で保存し直してください。 [E-0007]"
@@ -30,14 +22,6 @@ ERROR_00007 = {
 ERROR_00008 = {
     "code": "IF001_e013_err_encoding",
     "message": "ファイルの文字コードを判別できませんでした。CSV形式（UTF-8 BOM付き）で保存し直してください。 [E-0008]"
-}
-ERROR_00009 = {
-    "code": "IF001_e013_err_export_encoding",
-    "message": "ファイル {param_st1} を {param_st2} エンコーディングで保存中にエラーが発生しました。 [E-0009]"
-}
-ERROR_00010 = {
-    "code": "IF001_e013_err_residential_water_creation",
-    "message": "入力したインプットデータ（水道使用量、水道開閉栓状況）の水道番号カラムが正しく記載されているかご確認ください。入力したインプットデータ（水道使用量）のなかに、「推定したい日付」に設定した推定日の月よりも新しい月のデータが含まれている場合には、該当のデータを削除してください。 [E-0010]"
 }
 ERROR_00011 = {
     "code": "IF001_e014_err_file_loading",
@@ -47,17 +31,13 @@ ERROR_00012 = {
     "code": "IF001_e014_err_export_encoding",
     "message": "ファイル {param_st1} を {param_st2} エンコーディングで保存中にエラーが発生しました。 [E-0012]"
 }
-ERROR_00013 = {
-    "code": "IF001_e014_err_text_matching",
-    "message": "住所の照合に失敗しました。住所カラムに記載された住所が正しい表記となっているか確認してください。 [E-0013]"
-}
 ERROR_00014 = {
     "code": "IF001_e016_err_file_loading",
     "message": "ファイル {param_st1} の読み込み中にエラーが発生しました。 [E-0014]"
 }
 ERROR_00015 = {
     "code": "IF001_e016_err_convert_wkt",
-    "message": "建物ポリゴンデータで指定したジオメトリカラムが正しいWKT (Well-Known Text) 方式の文字列となっているかご確認ください。確認方法が不明な場合には、取得した建物ポリゴンデータを管理している部門に問い合わせを推奨します。 [E-0015]"
+    "message": "建物ポリゴンデータを CSV 形式で入力した場合に発生します。指定したジオメトリカラムが正しい WKT (Well-Known Text) 方式の文字列になっているかご確認ください。確認方法が不明な場合には、建物ポリゴンデータを管理している部門への問い合わせを推奨します。 [E-0015]"
 }
 ERROR_00016 = {
     "code": "IF001_e016_err_export_encoding_gpk",
@@ -75,25 +55,20 @@ ERROR_00019 = {
     "code": "IF001_e016_err_spatial_join",
     "message": "建物ポリゴンデータとジオコーディングデータの結合に失敗しました。ジオメトリカラムの指定や緯度経度データに不備がないか確認してください。 [E-0019]"
 }
+# 水道使用量の集計窓被覆（完全欠損）。集計窓（推定基準日から遡る1年）に検針が1件も
+# 無いと使用量特徴量が全件 NaN 化する。名寄せは止めず、警告として job_task に記録し
+# 確認事項バナーで示す。
 ERROR_00020 = {
-    "code": "IF001_e013_err_date_incorrect",
-    "message": "入力した水道使用量データの期間に推定日が含まれているかご確認ください。入力した水道使用量データの期間が推定日から遡って1年間が含まれているかご確認ください。 [E-0020]"
+    "code": "IF001_usage_err_no_basis_coverage",
+    "message": "水道使用量データに、推定基準日から遡って1年以内の検針記録が含まれていません。水道使用量に関する特徴量は推定に使われていません。推定基準日から遡って1年分の検針データを含めて再実行してください。 [E-0020]"
 }
 ERROR_00021 = {
     "code": "IF001_e016_err_allow_ext",
     "message": "対応していないファイル形式です。shp形式（zip）、gpkg形式、csv形式（ジオメトリカラム付）のいずれかを入力してください。 [E-0021]"
 }
-ERROR_00022 = {
-    "code": "IF001_e013_err_meter_reading_date",
-    "message": "入力したインプットデータ（水道開閉栓状況）の検針年月カラムが正しく指定されているか、日付が正しく記載されているかご確認ください。 [E-0022]"
-}
-ERROR_00023 = {
-    "code": "IF001_err_data",
-    "message": "{param_st1}のデータが異常です。誤ったファイルを読み込んでいないかもう一度データを確認ください。 [E-0023]"
-}
 ERROR_00024 = {
     "code": "IF001_e016_err_geometry",
-    "message": "'geometry' 列または 'lat' と 'lon' 列が必要です。 [E-0024]"
+    "message": "建物ポリゴンデータに位置情報の列が見つかりません。ジオメトリの列、または緯度・経度の列が含まれているかご確認ください。 [E-0024]"
 }
 ERROR_00025 = {
     "code": "IF001_e016_err_encoding",
@@ -107,21 +82,13 @@ ERROR_00027 = {
     "code": "IF001_e014_err_encoding",
     "message": "適切なエンコーディングが見つかりませんでした: {param_st1} [E-0027]"
 }
-ERROR_00028 = {
-    "code": "IF001_e013_err_residential_juki_creation",
-    "message": "入力したインプットデータ（住民基本台帳）の世帯番号カラムが正しく記載されているかご確認ください。 [E-0028]"
-}
-ERROR_00029 = {
-    "code": "IF001_e013_err_residential_toki_creation",
-    "message": "入力したインプットデータ（登記情報）が本システムのマニュアルに記載された要件に沿って作成されているかご確認ください。 [E-0029]"
-}
 ERROR_00030 = {
     "code": "IF001_e016_err_building_id",
     "message": "buildingIDカラムが見当たらず、エラーが生じています。入力したインプットデータ（建物ポリゴンデータ）の「データの種類」の指定を見直してください。 [E-0030]"
 }
 ERROR_00031 = {
     "code": "IF001_e016_err_merge_building_and_textmatchedresult",
-    "message": "建物ポリゴンデータと住所照合結果の結合に失敗しました。ジオメトリカラムや座標系に誤りがないか確認してください。 [E-0031]"
+    "message": "建物ポリゴンデータと名寄せ結果（住所で突き合わせた中間データ）の結合に失敗しました。建物ポリゴンデータのジオメトリカラムや座標系に誤りがないか確認してください。 [E-0031]"
 }
 ERROR_00032 = {
     "code": "IF001_e016_err_add_keycode",
@@ -142,26 +109,6 @@ ERROR_00035 = {
 ERROR_00036 = {
     "code": "IF001_e012_err_create_data_processed",
     "message": "入力したインプットデータ（{param_st1}）が本システムのマニュアルに記載された要件に沿って作成されているかご確認ください。 [E-0036]"
-}
-ERROR_00037 = {
-    "code": "IF001_e013_err_suido_number",
-    "message": "水道番号が本システムのマニュアルに記載された要件に沿って作成されているかご確認ください。 [E-0037]"
-}
-ERROR_00038 = {
-    "code": "IF001_e013_err_building_information",
-    "message": "水道データが本システムのマニュアルに記載された要件に沿って作成されているか、誤ったカラムが指定されていないかご確認ください。 [E-0038]"
-}
-ERROR_00039 = {
-    "code": "IF001_e013_err_data_birth",
-    "message": "住民基本台帳の生年月日情報が本システムのマニュアルに記載された要件に沿って作成されているかご確認ください。 [E-0039]"
-}
-ERROR_00040 = {
-    "code": "IF001_e013_err_data_move_date",
-    "message": "住定異動年月日が本システムのマニュアルに記載された要件に沿って作成されているかご確認ください。 [E-0040]"
-}
-ERROR_00041 = {
-    "code": "IF001_e016_err_format_ext_building_polygon",
-    "message": "建物ポリゴンデータのファイル形式が「データの種類」の指定と一致しません。正しいファイルを選択しているか確認してください。 [E-0041]"
 }
 ERROR_00042 = {
     "code": "IF001_e016_err_csv_geometry",
@@ -199,6 +146,25 @@ ERROR_00050 = {
 ERROR_00051 = {
     "code": "IF001_err_no_input_files",
     "message": "処理に必要なファイルが選択されていません。名寄せ処理にはデータファイルを指定してください。 [E-0051]"
+}
+# 住基の集計対象が0件。集計できるレコードが無いと住基由来の特徴量が全件 NaN 化する。
+# 1住所1世帯に当たる行が無い場合と、推定基準日以前に住定した行が無い場合の双方で起きる。
+# 名寄せは止めず、警告として job_task に記録し確認事項バナーで示す。
+ERROR_00052 = {
+    "code": "IF001_juki_err_no_single_household",
+    "message": "住民基本台帳データから、推定基準日時点の世帯として集計できるレコードが得られませんでした。住民基本台帳に関する特徴量は推定に使われていません。1つの住所に1つの世帯が対応しているか、推定基準日以前の住定年月日が含まれているかを確認して再実行してください。 [E-0052]"
+}
+ERROR_E101 = {
+    "code": "IF001_err_missing_required_column",
+    "message": "必須カラムがインポートデータに含まれていません（{param_st1}）。マニュアルの必須カラムをご確認のうえ、該当カラムを含めて保存し直し、再実行してください。 [E-101]"
+}
+ERROR_E102 = {
+    "code": "IF001_err_duplicate_column_mapping",
+    "message": "同じ入力列が複数のカラム項目に割り当てられています（{param_st1}）。各項目には別々の列を割り当て、再実行してください。 [E-102]"
+}
+ERROR_E103 = {
+    "code": "IF001_err_join_key_type_mismatch",
+    "message": "{param_st1}を突き合わせる処理でエラーが発生しました。両方のファイルで同じ種類の値（数値なら数値、文字列なら文字列）が入る列を割り当てているかご確認のうえ、再実行してください。 [E-103]"
 }
 
 # IF003
@@ -240,7 +206,7 @@ ERROR_20009 = {
 }
 ERROR_20010 = {
     "code": "IF003_e032_err_areadata_format",
-    "message": "対応していないファイル形式です。shp形式（zip）、gpkg形式、csv形式（ジオメトリカラム付）のいずれかを入力してください。 [E-20010]"
+    "message": "対応していないファイル形式です。shp形式（zip）、gpkg形式、GeoJSON形式のいずれかを入力してください。 [E-20010]"
 }
 ERROR_20011 = {
     "code": "IF003_e032_err_areadata_import",
@@ -248,7 +214,7 @@ ERROR_20011 = {
 }
 ERROR_20012 = {
     "code": "IF003_e032_err_aggregation",
-    "message": "集計に用いている地域集計処理データの座標系が付与されているかご確認ください。元データに不備がある場合にはデータ提供元に問い合わせを推奨します。 [E-20012]"
+    "message": "集計に用いている地域集計用データの座標系が付与されているかご確認ください。元データに不備がある場合にはデータ提供元に問い合わせを推奨します。 [E-20012]"
 }
 ERROR_20013 = {
     "code": "IF003_e032_err_insert_sql",
@@ -256,7 +222,7 @@ ERROR_20013 = {
 }
 ERROR_20014 = {
     "code": "IF003_e032_err_allow_ext",
-    "message": "対応していないファイル形式です。shp形式（zip）、gpkg形式、csv形式（ジオメトリカラム付）のいずれかを入力してください。 [E-20014]"
+    "message": "対応していないファイル形式です。shp形式（zip）、gpkg形式、GeoJSON形式のいずれかを入力してください。 [E-20014]"
 }
 ERROR_20015 = {
     "code": "IF003_err_aggregation_data",
@@ -274,23 +240,39 @@ ERROR_20018 = {
     "code": "IF003_err_no_normalized_dataset",
     "message": "名寄せ処理済データが選択されていません。空き家推定にはデータセットを指定してください。 [E-20018]"
 }
+# IF002（モデル構築）。番号帯は E-1xxxx（IF001=E-0xxx / IF003=E-2xxxx / IF004=E-3xxxx / IF005=E-5xxxx の空き帯）。
+# E021 の総括 except が送出理由を {param_st1} に載せる（ラベルカラム未検出・正例0件・有効説明変数0個 等）。
+ERROR_10001 = {
+    "code": "IF002_e021_err_model_learning",
+    "message": "モデル構築処理でエラーが発生しました。{param_st1} [E-10001]"
+}
 
-# IF004
+# 説明変数の型不一致（FR004-007 R-077 = E-201）。モデル構築/推定の入力に非数値の説明変数列。
+ERROR_FEATURE_TYPE_IF002 = {
+    "code": "IF002_e021_err_feature_non_numeric",
+    "message": "説明変数に数値として読めない値が含まれています（{param_st1}）。該当カラムの値を数値に修正して再実行してください。 [E-201]"
+}
+ERROR_FEATURE_TYPE_IF003 = {
+    "code": "IF003_e022_err_feature_non_numeric",
+    "message": "説明変数に数値として読めない値が含まれています（{param_st1}）。該当カラムの値を数値に修正して再実行してください。 [E-201]"
+}
+
+# IF004（推定結果の書き出し。入力ファイルではなく DB の推定結果を読んで出力する）
 ERROR_30001 = {
     "code": "IF004_e033_err_import_path",
-    "message": "ファイルの読み込み中にエラーが発生しました。 [E-30001]"
+    "message": "推定結果データの読み込み中にエラーが発生しました。時間をおいて再実行しても解決しない場合は開発元へお問い合わせください。 [E-30001]"
 }
 ERROR_30002 = {
     "code": "IF004_e033_err_export_path",
-    "message": "ファイルを出力中にエラーが発生しました。 [E-30002]"
+    "message": "推定結果ファイルの出力中にエラーが発生しました。保存先の空き容量や書き込み権限をご確認ください。 [E-30002]"
 }
 ERROR_30003 = {
     "code": "IF004_e033_err_conversion",
-    "message": "正しいCRS（参照座標系）になっているかご確認ください。 [E-30003]"
+    "message": "推定結果の座標変換に失敗しました。正しいCRS（参照座標系）になっているかご確認ください。 [E-30003]"
 }
 ERROR_30004 = {
     "code": "IF004_e033_err_allow_ext",
-    "message": "CSV形式、GeoPackage形式、GeoJSON形式のファイルを指定してください。 [E-30004]"
+    "message": "出力形式には CSV / GeoPackage / GeoJSON のいずれかを指定してください。 [E-30004]"
 }
 
 # IF005
@@ -408,9 +390,9 @@ TRANSLATE_COLUMNS_IF001 = {
     "KEY_CODE": "地域名称コード",
     "S_NAME": "地域名称",
     "residenceID": "residenceID",
-    "address_building_type_determination": "推定対象選定用データ住所",
-    "latitude_building_type_determination": "推定対象選定用データ緯度",
-    "longitude_building_type_determination": "推定対象選定用データ経度",
+    "address_building_type_determination": "処理対象選定用データ住所",
+    "latitude_building_type_determination": "処理対象選定用データ緯度",
+    "longitude_building_type_determination": "処理対象選定用データ経度",
     "usage_building_type_determination": "家屋種別",
     "household_code_juki_residence": "世帯番号",
     "household_size_juki_residence": "世帯人数",
@@ -434,7 +416,6 @@ TRANSLATE_COLUMNS_IF001 = {
     "change_rate_waterusage_over_last4months": "直近４ヶ月の使用量増減率",
     "structure_touki_residence": "登記構造",
     "registration_date_touki_residence": "登記日付",
-    "days_since_registration_event": "登記事由発生からの経過日",
     "flag_concreteblock": "コンクリートブロック造",
     "flag_brick": "煉瓦造",
     "flag_reinforcedconcreteconstruction": "鉄筋コンクリート造",
@@ -442,11 +423,9 @@ TRANSLATE_COLUMNS_IF001 = {
     "flag_wood": "木造",
     "flag_earthen": "土造",
     "flag_otherstructures": "その他構造",
-    "flag_inheritance": "相続",
-    "flag_gift": "贈与",
-    "flag_sale": "売買",
-    "flag_seizure": "差押",
-    "date_registration_event": "登記事由発生日",
+    "building_age_years": "築年数",
+    "years_since_inheritance": "相続後経過年数",
+    "years_since_extension": "増築後経過年数",
     "juki_residence_flag": "住民データ有無フラグ",
     "geocoding_cleaned_flag": "ジオコーディング有無フラグ",
     "suido_residence_flag": "水道データ有無フラグ",
@@ -462,6 +441,10 @@ TRANSLATE_COLUMNS_IF001 = {
     "usage_second_half_avg": "後半平均使用水量",
     "usage_half_year_change_rate": "半期変化率",
     "recent_usage_avg": "直近使用水量",
+    # 空き家調査結果の5列は自己マッピング（英語のまま出力する）。
+    # 日本語化すると E021 の LABEL_COL・MAPPING_E022_TO_IF001・検証ラボの追随が要る。
+    # 利用者に見せる名前は app/src/shared/utils/normalized-csv-header.ts が
+    # 表示・ダウンロード・アップロードの境界で読み替える（ADR-0029）。
     "is_vacant": "is_vacant",
     "vacant_type": "vacant_type",
     "vacant_source": "vacant_source",
@@ -586,9 +569,9 @@ MAPPING_E022_TO_IF001 = {
     "地域名称コード": "key_code",
     "地域名称": "area_group",
     "residenceID": "residence_id",
-    "推定対象選定用データ住所": "address_for_building_type",
-    "推定対象選定用データ緯度": "latitude_for_building_type",
-    "推定対象選定用データ経度": "longitude_for_building_type",
+    "処理対象選定用データ住所": "address_for_building_type",
+    "処理対象選定用データ緯度": "latitude_for_building_type",
+    "処理対象選定用データ経度": "longitude_for_building_type",
     "家屋種別": "building_type",
     "世帯番号": "household_code",
     "世帯人数": "household_size",
@@ -611,7 +594,6 @@ MAPPING_E022_TO_IF001 = {
     "一人当たり検針水量": "average_waterusage_person",
     "直近４ヶ月の使用量増減率": "change_rate_waterusage_over_last4months",
     "登記構造": "structure_name",
-    "登記事由発生からの経過日": "days_since_registration_event",
     "コンクリートブロック造": "flag_concreteblock",
     "煉瓦造": "flag_brick",
     "鉄筋コンクリート造": "flag_reinforcedconcreteconstruction",
@@ -619,12 +601,10 @@ MAPPING_E022_TO_IF001 = {
     "木造": "flag_wood",
     "土造": "flag_earthen",
     "その他構造": "flag_otherstructures",
-    "相続": "flag_inheritance",
-    "贈与": "flag_gift",
-    "売買": "flag_sale",
-    "差押": "flag_seizure",
+    "築年数": "building_age_years",
+    "相続後経過年数": "years_since_inheritance",
+    "増築後経過年数": "years_since_extension",
     "登記日付": "registration_date",
-    "登記事由発生日": "date_registration_event",
     "住民データ有無フラグ": "has_juki_registry",
     "ジオコーディング有無フラグ": "has_geocoding",
     "水道データ有無フラグ": "has_water_supply",
@@ -761,7 +741,9 @@ COLUMNS_TO_LEARN = [
     "転出・転居数",
     "15歳未満人数",
     "65歳以上人数",
-    "登記事由発生からの経過日",
+    "築年数",
+    "相続後経過年数",
+    "増築後経過年数",
     "コンクリートブロック造",
     "鉄筋コンクリート造",
     "鉄骨造",
@@ -769,10 +751,6 @@ COLUMNS_TO_LEARN = [
     "土造",
     "煉瓦造",
     "その他構造",
-    "相続",
-    "贈与",
-    "売買",
-    "差押",
     "ゼロ使用期数",
     "最小水道使用量",
     "使用量データあり",
@@ -811,6 +789,7 @@ COLUMNS_EXPORT_BUILDING_IF004 = {
    "measured_height": "標高",
    "outer_building_installation": "建物付属物",
    "storey_heights_above_ground": "地上階の階数",
+   "storeys_above_ground": "地上階数",
    "total_floor_area": "当該建築物の各階の床⾯積の合計",
    "year_of_construction": "建築された年",
    "year_of_demolition": "解体された年",
@@ -832,6 +811,7 @@ COLUMNS_EXPORT_BUILDING_IF004 = {
    "num_deaths": "死亡人数",
    "num_inmigrants": "転入数",
    "num_outmigrants_relocations": "転出・転居数",
+   "num_cancellations": "職権消除数",
    "reference_date": "推定日",
    "water_supply_number": "水道番号",
    "water_disconnection_flag": "閉栓フラグ",
@@ -843,8 +823,8 @@ COLUMNS_EXPORT_BUILDING_IF004 = {
    "years_water_closure": "閉栓後年数",
    "average_waterusage_person": "一人当たり検針水量",
    "change_rate_waterusage_over_last4months": "直近４ヶ月の使用量増減率",
+   "flag_zero_usage_over4consecutivemonths": "連続4か月使用量0フラグ",
    "structure_name": "登記構造",
-   "days_since_registration_event": "登記事由発生からの経過日",
    "flag_concreteblock": "コンクリートブロック造",
    "flag_brick": "煉瓦造",
    "flag_reinforcedconcreteconstruction": "鉄筋コンクリート造",
@@ -852,18 +832,24 @@ COLUMNS_EXPORT_BUILDING_IF004 = {
    "flag_wood": "木造",
    "flag_earthen": "土造",
    "flag_otherstructures": "その他構造",
-   "flag_inheritance": "相続",
-   "flag_gift": "贈与",
-   "flag_sale": "売買",
-   "flag_seizure": "差押",
+   "building_age_years": "築年数",
+   "years_since_inheritance": "相続後経過年数",
+   "years_since_extension": "増築後経過年数",
    "registration_date": "登記日付",
-   "date_registration_event": "登記事由発生日",
    "has_juki_registry": "住民データ有無フラグ",
    "has_water_supply": "水道データ有無フラグ",
    "has_touki_registry": "登記情報データ有無フラグ",
    "buildingtype_determination_not_possible_flag": "家屋種別判定不可フラグ",
    "predicted_label": "空き家推定結果",
    "predicted_probability": "空き家推定確率",
+   "predicted_probability_change_rate_from_oldest": "空き家推定確率の変化率（最古年度比）",
+   "predicted_probability_change_rate_from_previous": "空き家推定確率の変化率（前年度比）",
+   # 空き家調査結果（実測ラベル）。名寄せで空き家調査結果を結合した場合のみ値を持つ
+   "is_vacant": "空き家",
+   "vacant_type": "空き家区分",
+   "vacant_source": "空き家調査元",
+   "vacant_year": "空き家調査年度",
+   "address_precision_flag": "調査住所精度不足フラグ",
    "created_at": "空き家推定データ作成日",
    "waterusage_11to12m_ago": "検針水量（推定月の11・12ヶ月前）",
    "waterusage_9to10m_ago": "検針水量（推定月の9・10ヶ月前）",

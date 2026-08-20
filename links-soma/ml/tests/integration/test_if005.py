@@ -333,6 +333,81 @@ class TestE017MultipleDataSources:
 
 
 # ============================================================
+# E017 lev_match() — 空き家調査結果・建物関連データ（#1775 PR2）
+# ============================================================
+
+
+class TestE017OptionalAndVacantSources:
+    """空き家調査結果(vacant_house)・建物関連データ(optional_data_source)を
+    表記ゆれチェック対象に加えたときの検証（#1775 PR2）。
+
+    この2データはTARGET_NAME_MAPで恒等写像（juki→resident_registryのような
+    別名変換を持たない）。frontendのJoinCheckTargetと同名で結果が返ることを保証する。
+    """
+
+    @pytest.fixture
+    def env_optional_vacant(self, tmp_path, test_db):
+        output_dir = str(tmp_path / "output")
+        os.makedirs(output_dir, exist_ok=True)
+        logs_dir = str(tmp_path / "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+
+        suido_df = pd.DataFrame({
+            "normalized_address": ["渡刈町乗蔵17", "上仁木町下田391"]
+        })
+        _write_csv(os.path.join(output_dir, "suido_status_cleaned.csv"), suido_df)
+
+        # 建物関連データ: 旧字体（水道に不在 → 候補になる）
+        optional_df = pd.DataFrame({
+            "normalized_address": ["渡刈町乗藏4"]
+        })
+        _write_csv(
+            os.path.join(output_dir, "optional_data_source_cleaned.csv"),
+            optional_df,
+        )
+
+        # 空き家調査結果: 水道に不在の大字（候補になる）
+        vacant_df = pd.DataFrame({
+            "normalized_address": ["南町5"]
+        })
+        _write_csv(
+            os.path.join(output_dir, "vacant_house_cleaned.csv"), vacant_df
+        )
+
+        return {
+            "db_path": test_db,
+            "job_id": _insert_job(test_db),
+            "output_dir": output_dir,
+            "suido_path": os.path.join(output_dir, "suido_status_cleaned.csv"),
+            "logs_dir": logs_dir,
+        }
+
+    def test_target_names_are_identity_for_new_sources(self, env_optional_vacant):
+        """optional_data_source / vacant_house はTARGET_NAME_MAPで恒等写像される"""
+        lev_match(
+            main_csv=env_optional_vacant["suido_path"],
+            input_source=["optional_data_source", "vacant_house"],
+            output_path=env_optional_vacant["output_dir"],
+            job_id=env_optional_vacant["job_id"],
+            db_path=env_optional_vacant["db_path"],
+            logs_dir=env_optional_vacant["logs_dir"],
+            output_directory=env_optional_vacant["output_dir"],
+            threshold=0.8,
+            max_number=5,
+            debug=False,
+        )
+        tasks = _get_job_tasks(
+            env_optional_vacant["db_path"], env_optional_vacant["job_id"]
+        )
+        targets = {
+            json.loads(t["result"])["target"]
+            for t in tasks
+            if t["result"]
+        }
+        assert targets == {"optional_data_source", "vacant_house"}
+
+
+# ============================================================
 # IF005 main() — ジョブ管理・ステータス遷移
 # ============================================================
 
@@ -437,6 +512,101 @@ class TestIF005Main:
 
         jobs = _get_all_jobs(main_env["db_path"])
         assert jobs[0]["status"] == "complete"
+
+
+# ============================================================
+# IF005 main() — 空き家調査結果・建物関連データの端から端まで（#1775 PR2）
+# ============================================================
+
+
+class TestIF005NewDataSourcesEndToEnd:
+    """IF005 main() が vacant_house / optional_data_source を
+    パラメータ抽出 → E012正規化 → E017結合チェック まで通すことを検証する。
+
+    生データ（住所カラムのみ）を渡し、job_tasks の target に2データが現れれば、
+    (1) IF005 のパラメータ抽出・input_source 追加
+    (2) E012 normalize_address の cleaned CSV 生成
+    (3) E017 の input_source ループと TARGET_NAME_MAP
+    の配線が端から端まで成立している。
+    """
+
+    @pytest.fixture
+    def main_env(self, tmp_path, test_db):
+        output_path = str(tmp_path / "output")
+        os.makedirs(output_path, exist_ok=True)
+
+        suido_df = pd.DataFrame({
+            "住所": ["渡刈町乗蔵17", "渡刈町乗蔵1-2", "上仁木町下田391"]
+        })
+        _write_csv(os.path.join(output_path, "suido_status.csv"), suido_df)
+
+        # 建物関連データ: 住所カラムに加え説明変数カラムを持つ（住所のみ抽出される）
+        optional_df = pd.DataFrame({
+            "住所": ["渡刈町乗藏4"],
+            "築年数": ["30"],
+        })
+        _write_csv(os.path.join(output_path, "optional.csv"), optional_df)
+
+        vacant_df = pd.DataFrame({
+            "住所": ["南町5"]
+        })
+        _write_csv(os.path.join(output_path, "vacant.csv"), vacant_df)
+
+        return {
+            "db_path": test_db,
+            "output_path": output_path,
+        }
+
+    def _build_params(self, db_path, output_path):
+        return {
+            "database_path": db_path,
+            "job_id": None,
+            "output_path": output_path,
+            "data": {
+                "water_status": {
+                    "path": "suido_status.csv",
+                    "columns": {"address": "住所"},
+                },
+                "optional_data_source": {
+                    "path": "optional.csv",
+                    "columns": {"address": "住所"},
+                },
+                "vacant_house": {
+                    "path": "vacant.csv",
+                    "columns": {"address": "住所"},
+                },
+            },
+            "settings": {
+                "threshold": "0.8",
+                "max_number": "5",
+                "municipality": "テスト市",
+            },
+        }
+
+    def test_new_sources_appear_as_join_check_targets(self, main_env):
+        """vacant_house / optional_data_source が結合チェック結果に現れる"""
+        params = self._build_params(
+            main_env["db_path"], main_env["output_path"]
+        )
+        test_args = ["IF005.py", "--parameters", json.dumps(params)]
+
+        with patch("sys.argv", test_args):
+            import IF005
+            importlib.reload(IF005)
+            IF005.main()
+
+        jobs = _get_all_jobs(main_env["db_path"])
+        assert len(jobs) >= 1
+        assert jobs[0]["status"] == "complete"
+
+        tasks = _get_job_tasks(main_env["db_path"], jobs[0]["id"])
+        targets = {
+            json.loads(t["result"])["target"]
+            for t in tasks
+            if t["result"] and t["preprocess_type"] == "e017"
+        }
+        assert "optional_data_source" in targets
+        assert "vacant_house" in targets
 
 
 # ============================================================

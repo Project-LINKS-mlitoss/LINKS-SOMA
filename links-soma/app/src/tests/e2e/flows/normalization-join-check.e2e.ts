@@ -39,7 +39,11 @@ test.describe("住所の表記ゆれチェックダイアログ", () => {
     test.setTimeout(180000);
 
     await startNormalizationWizard(page);
-    await walkWizard(page);
+    // 空き家調査結果・建物関連データも選択し、表記ゆれチェック対象に含める（#1775 PR2）
+    await walkWizard(page, {
+      vacantHouse: "select",
+      optionalDataSource: "select",
+    });
 
     // 確認画面に到達
     await expect(page.getByRole("button", { name: "開始する" })).toBeVisible();
@@ -71,7 +75,14 @@ test.describe("住所の表記ゆれチェックダイアログ", () => {
       dialog.getByText("ジオコーディング", { exact: true }),
     ).toBeVisible();
     await expect(
-      dialog.getByText("推定対象選定用データ", { exact: true }),
+      dialog.getByText("処理対象選定用データ", { exact: true }),
+    ).toBeVisible();
+    // #1775 PR2 で追加した2データもチェック対象として表示される
+    await expect(
+      dialog.getByText("空き家調査結果", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("建物関連データ", { exact: true }),
     ).toBeVisible();
 
     // 「チェック実行」ボタンが有効であることを確認
@@ -93,9 +104,7 @@ test.describe("住所の表記ゆれチェックダイアログ", () => {
     test.setTimeout(300000); // 最大5分（IF005処理時間: 1〜5分）
 
     // ダイアログを再度開く
-    await page
-      .getByRole("button", { name: "住所の表記ゆれチェック" })
-      .click();
+    await page.getByRole("button", { name: "住所の表記ゆれチェック" }).click();
     await page.waitForSelector('[role="dialog"]');
 
     // チェック実行
@@ -107,9 +116,9 @@ test.describe("住所の表記ゆれチェックダイアログ", () => {
     ).toBeVisible({ timeout: 10000 });
 
     // 全件完了まで待機（「閉じる」ボタンが表示されたら完了）
-    await expect(
-      page.getByRole("button", { name: "閉じる" }),
-    ).toBeVisible({ timeout: 300000 });
+    await expect(page.getByRole("button", { name: "閉じる" })).toBeVisible({
+      timeout: 300000,
+    });
 
     // 結果画面の構造を検証
     const dialog = page.locator('[role="dialog"]');
@@ -125,9 +134,7 @@ test.describe("住所の表記ゆれチェックダイアログ", () => {
     ).toBeVisible();
 
     // 「再実行」ボタンが表示されている
-    await expect(
-      page.getByRole("button", { name: "再実行" }),
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "再実行" })).toBeVisible();
   });
 
   test("結果にゆれ候補がある場合、展開して詳細を確認できる", async () => {

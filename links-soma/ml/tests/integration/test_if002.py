@@ -41,6 +41,20 @@ def _get_job_results(db_path):
     return query_all(db_path, "job_results")
 
 
+def _error_detail_of(task):
+    """job_task の result(JSON文字列) から FR006 の error_detail を取り出す。無ければ None。"""
+    raw = task.get("result")
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(parsed, dict):
+        return parsed.get("error_detail")
+    return None
+
+
 def _ml_root():
     """ml/ ディレクトリのパスを返す"""
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -211,6 +225,22 @@ class TestIF002BasicTraining:
         assert "feature_importance" in metrics
         assert "training_info" in metrics
 
+    def test_task_result_has_durations(self, env):
+        """NR007: job_tasks.resultに処理時間（全体・学習）が秒で記録される"""
+        _run_if002(env["params"])
+        tasks = _get_job_tasks(env["test_db"])
+        model_task = next(
+            (t for t in tasks if t.get("result") and "model_create" in t["result"]),
+            None,
+        )
+        assert model_task is not None, "model_createタスクが見つからない"
+        result = json.loads(model_task["result"])
+        for key in ["durationTotalSec", "durationTrainingSec"]:
+            assert key in result, f"resultに{key}がない: {list(result.keys())}"
+            assert float(result[key]) > 0, f"{key}が正の値でない: {result[key]}"
+        # 全体（読み込み〜保存）は学習を内包するので 全体 >= 学習
+        assert float(result["durationTotalSec"]) >= float(result["durationTrainingSec"])
+
     def test_output_directory_cleaned_up(self, env):
         """spec: 一時ディレクトリはfinally句で削除される"""
         _run_if002(env["params"])
@@ -348,6 +378,52 @@ class TestIF002NoFeatures:
         _run_if002(env["params"])
         jobs = _get_jobs(env["test_db"])
         assert jobs[0]["status"] == "error"
+
+
+class TestIF002FeatureTypeMismatch:
+    """FR004-007: 説明変数に非数値が混入 → 型不一致(E-201)を責任分界つきで記録しエラー停止。
+
+    旧挙動は _prepare_features の .to_numpy(dtype=float) で不透明にクラッシュ。消費前に検出し、
+    どの列が非数値かを示す attributed error（IF002_e021_err_feature_non_numeric）にする。
+    説明変数 avg_water_usage の1セルを非数値にして実処理で発火させる。
+    """
+
+    @pytest.fixture
+    def env(self, test_db, tmp_path):
+        data_dir = str(tmp_path / "data")
+        os.makedirs(data_dir, exist_ok=True)
+        n = 100  # _create_training_csv 既定の正例10+負例90
+        rng = np.random.RandomState(1)
+        bad = [float(v) for v in rng.uniform(0, 50, n)]
+        bad[3] = "不明"  # 説明変数 avg_water_usage に非数値を1件混入
+        _create_training_csv(data_dir, extra_cols={"avg_water_usage": bad})
+        params = _base_params(test_db, data_dir)
+        return {"test_db": test_db, "data_dir": data_dir, "params": params}
+
+    def test_job_status_is_error(self, env):
+        _run_if002(env["params"])
+        jobs = _get_jobs(env["test_db"])
+        assert jobs[0]["status"] == "error"
+
+    def test_attributed_error_task_recorded(self, env):
+        _run_if002(env["params"])
+        tasks = _get_job_tasks(env["test_db"])
+        error_tasks = [
+            t for t in tasks if t["error_code"] == "IF002_e021_err_feature_non_numeric"
+        ]
+        assert len(error_tasks) == 1, (
+            f"E-201(説明変数型不一致)が1件記録されるべき。codes={[t['error_code'] for t in tasks]}"
+        )
+        detail = _error_detail_of(error_tasks[0])
+        assert detail is not None, "error_detail が result に載っていない"
+        assert detail["display_code"] == "E-201"
+        assert detail["responsibility"] == "自治体修正"
+        assert "avg_water_usage" in (error_tasks[0]["error_msg"] or "")
+        # 汎用 model_learning(状況依存)を二重記録しない（責任分界が割れない）
+        stale = [
+            t for t in tasks if t["error_code"] == "IF002_e021_err_model_learning"
+        ]
+        assert stale == [], f"型不一致は E-201 のみで記録すべき。二重記録={stale}"
 
 
 class TestIF002NoLabelColumn:

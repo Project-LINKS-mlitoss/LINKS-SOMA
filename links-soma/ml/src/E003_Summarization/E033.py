@@ -182,11 +182,83 @@ def read_input_data(result_views):
         set_error(ERROR_30001)
         raise Exception(e)
 
+ODS_EXPORT_PREFIX = "[追加] "
+
+
+def _parse_ods_entries(value):
+    """optional_data_source の1行分をエントリのリストに変換する。
+
+    値は E022.collect_ods_to_json が書いた JSON 文字列。建物関連データを
+    結合していない行は NULL になるため、リスト以外は空として扱う。
+    """
+    if not isinstance(value, str) or not value:
+        return []
+    try:
+        entries = json.loads(value)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(entries, list):
+        return []
+    return [entry for entry in entries if isinstance(entry, dict)]
+
+
+def expand_optional_data_source(gdf):
+    """建物関連データ(optional_data_source)を個別カラムへ展開する。
+
+    列名は分析画面の表示名と揃える(app/src/shared/types/optional-data-source.ts の
+    toOdsDisplayName)。`[追加] ` の接頭辞は、利用者CSVの見出しが既存の日本語列名と
+    衝突するのを防ぐ。
+
+    列の集合は全行の和集合。画面側(expand-optional-data-source.ts)はページ単位で
+    先頭行から決めるが、出力は結果全体を1度に書くため同じ規則では取りこぼす。
+
+    戻り値は (展開後の GeoDataFrame, 追加した列名のリスト)。
+    """
+    if "optional_data_source" not in gdf.columns:
+        return gdf, []
+
+    # 行ごとに name -> value の辞書を1度だけ作る。列ごとに線形探索すると
+    # 列数の2乗に比例して遅くなるため（推定結果は数十万行になりうる）
+    rows = [
+        {
+            entry.get("name"): entry.get("value")
+            for entry in _parse_ods_entries(value)
+            if entry.get("name")
+        }
+        for value in gdf["optional_data_source"]
+    ]
+    gdf = gdf.drop(columns=["optional_data_source"])
+
+    # 列は全行の和集合を取る。複数年度の推定は1つの data_set_result_id に
+    # 年度ごとの行を書き込むため(IF003)、年度で建物関連データの列が違いうる。
+    # 先頭行だけで決めると、後の年度にしかない列が全行から消える。
+    names = []
+    seen = set()
+    for row in rows:
+        for name in row:
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+
+    ods_columns = []
+    for name in names:
+        column = f"{ODS_EXPORT_PREFIX}{name}"
+        if column in gdf.columns or column in ods_columns:
+            continue
+        gdf[column] = [row.get(name) for row in rows]
+        ods_columns.append(column)
+
+    return gdf, ods_columns
+
+
 def rename_columns(gdf, ext, job_id=None, target_unit="building", columns_name=None):
     if target_unit == "building":
         columns = COLUMNS_EXPORT_BUILDING_IF004
+        # 展開後の列名は既に最終形のため rename_dict には入れず、選択リストにだけ足す
+        gdf, ods_columns = expand_optional_data_source(gdf)
     else:
         columns = TRANSLATE_COLUMNS_AREA
+        ods_columns = []
 
     if ext != "csv":
         rename_dict = {col: columns[col] for col in gdf.columns if col in columns and col != "geometry"}
@@ -197,6 +269,8 @@ def rename_columns(gdf, ext, job_id=None, target_unit="building", columns_name=N
     else:
         rename_dict = {col: columns[col] for col in gdf.columns if col in columns}
         selected_columns = list(rename_dict.keys())
+
+    selected_columns = selected_columns + ods_columns
 
     gdf = gdf[selected_columns]
     gdf = gdf.rename(columns=rename_dict)
@@ -210,6 +284,11 @@ def rename_columns(gdf, ext, job_id=None, target_unit="building", columns_name=N
 
         # Get the renamed columns that exist in our dataframe
         existing_renamed_columns = [col for col in translation_order if col in gdf.columns]
+
+        # 建物関連データは辞書に無い動的な列。並べ替えで落ちないよう末尾に足す
+        existing_renamed_columns = existing_renamed_columns + [
+            col for col in ods_columns if col in gdf.columns
+        ]
 
         # Reorder the dataframe columns
         gdf = gdf[existing_renamed_columns]
@@ -305,11 +384,13 @@ def processing(params, job_id=None, db_path=None):
     """
     メイン処理を行う関数
     """
+    # task_id は except でも参照する。try の内側で束縛すると、接続やパラメータ解決で
+    # 失敗したときに except 自身が UnboundLocalError で落ち、エラーを記録できなくなる。
+    task_id = None
     try:
         if db_path:
             connect_sqllite(db_path)
         output_path = params['output_path']
-        task_id = None
         if job_id:
             task_id = create_or_update_job_task(job_id, progress_percent="0", preprocess_type=None, error_code=None, error_msg=None, result=json.dumps({}))
 
@@ -359,10 +440,14 @@ def processing(params, job_id=None, db_path=None):
             
         return output_file_path
     except Exception as e:
+        # 記録より先にフォールバック(E-30003)を立てる。順序が逆だと想定外の例外で
+        # ERROR_MSG が None のまま記録され、画面が原因を示せなくなる。
+        is_fallback = ERROR_CODE is None
+        if is_fallback:
+            set_error(ERROR_30003)
         if task_id is not None:
             create_or_update_job_task(job_id, progress_percent="", preprocess_type=None, error_code=ERROR_CODE, error_msg=ERROR_MSG, result=json.dumps({}), id= task_id, is_finish=True)
-        if ERROR_CODE is None:
-            set_error(ERROR_30003)
+        if is_fallback:
             raise Exception("正しいCRS（参照座標系）になっているかご確認ください。")
 
         raise Exception(e)

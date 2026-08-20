@@ -5,12 +5,27 @@ declare module '@digital-go-jp/abr-geocoder/build/index' {
   import { Duplex } from 'stream';
   export const DEFAULT_FUZZY_CHAR: string;
 
+  /** common.sqlite の city テーブル1行。county / ward は該当しない自治体では空文字。 */
+  export interface AbrCityRow {
+    lg_code: string;
+    county: string;
+    city: string;
+    ward: string;
+    pref: string;
+  }
+
   export class AbrGeocoderDiContainer {
     constructor(params: {
       database: { type: 'sqlite3'; dataDir: string };
       cacheDir: string;
       debug?: boolean;
     });
+    readonly database: {
+      openCommonDb(): Promise<{
+        getCityList(): Promise<AbrCityRow[]>;
+        close(): Promise<void>;
+      }>;
+    };
   }
 
   export class AbrGeocoder {

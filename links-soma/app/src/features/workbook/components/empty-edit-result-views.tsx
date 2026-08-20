@@ -1,5 +1,5 @@
 import { Body1Stronger, makeStyles, tokens } from "@fluentui/react-components";
-import { ButtonCreateView } from "./button-create-view";
+import { ButtonAddView } from "./button-add-view";
 
 const useStyles = makeStyles({
   empty: {
@@ -36,7 +36,7 @@ export const EmptyEditResultViews = (): JSX.Element => {
         <img alt="empty" className={styles.emptyImage} src="Graph.png" />
         <div className={styles.emptyText}>
           <Body1Stronger>表示するビューがありません。</Body1Stronger>
-          <ButtonCreateView />
+          <ButtonAddView />
         </div>
       </div>
     </div>

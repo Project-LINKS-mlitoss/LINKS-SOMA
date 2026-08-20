@@ -1,0 +1,2 @@
+ALTER TABLE `data_set_detail_buildings` ADD `predicted_probability_change_rate_from_oldest` real;--> statement-breakpoint
+ALTER TABLE `data_set_detail_buildings` ADD `predicted_probability_change_rate_from_previous` real;

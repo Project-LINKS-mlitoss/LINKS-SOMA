@@ -2,8 +2,9 @@ import { type AddLayerObject, type FilterSpecification } from "maplibre-gl";
 import { LAYER_SUFFIXES } from "../../components/views/map/map-container/const";
 import {
   LAYER_COLORS,
-  createColorExpression,
+  createColorExpressionForMetric,
   createClickedStateExpression,
+  type MapColorMetric,
 } from "./layer-styles";
 
 /**
@@ -11,11 +12,13 @@ import {
  * @param layerId レイヤーID
  * @param predictedProbability 色分けのしきい値
  * @param colorPropertyName 色分けに使用するプロパティ名（デフォルト: predicted_probability）
+ * @param colorMetric 色分けが表す指標（確率／変化率）
  */
 export const createAddPointLayerObject = (
   layerId: string,
   predictedProbability: { medium: number; high: number },
   colorPropertyName = "predicted_probability",
+  colorMetric: MapColorMetric = "probability",
 ): AddLayerObject => ({
   id: `${layerId}${LAYER_SUFFIXES.POINTS}`,
   type: "circle",
@@ -23,9 +26,10 @@ export const createAddPointLayerObject = (
   maxzoom: 22,
   minzoom: 8,
   paint: {
-    "circle-color": createColorExpression(
-      predictedProbability,
+    "circle-color": createColorExpressionForMetric(
+      colorMetric,
       colorPropertyName,
+      predictedProbability,
     ),
     "circle-radius": createClickedStateExpression(10, 6),
     "circle-opacity": createClickedStateExpression(1.0, 0.8),

@@ -4,12 +4,19 @@ import { rendererLogger } from "../../../../shared/utils/renderer-logger";
 
 export type GetFeatureById = (id: number) => Promise<FeatureData | null>;
 
+/** 開いているフィーチャーを別の推定基準日の同一対象へ引き直す。該当なしは null。 */
+export type GetFeatureByReferenceDate = (
+  feature: FeatureData,
+  referenceDate: string | undefined,
+) => Promise<FeatureData | null>;
+
 type UseFeatureFetcherProps = {
   unit: "building" | "area";
 };
 
 type UseFeatureFetcherReturn = {
   getFeatureById: GetFeatureById;
+  getFeatureByReferenceDate: GetFeatureByReferenceDate;
 };
 
 /**
@@ -43,5 +50,56 @@ export const useFeatureFetcher = ({
     [unit],
   );
 
-  return { getFeatureById };
+  const getFeatureByReferenceDate = useCallback(
+    async (
+      feature: FeatureData,
+      referenceDate: string | undefined,
+    ): Promise<FeatureData | null> => {
+      if (!referenceDate) return null;
+      try {
+        const props = feature.properties as Record<string, unknown>;
+        const dataSetResultId = props.data_set_result_id;
+        if (typeof dataSetResultId !== "number") return null;
+
+        if (unit === "area") {
+          const areaGroup = props.area_group;
+          const keyCode = props.key_code;
+          if (typeof areaGroup !== "string" || typeof keyCode !== "string") {
+            return null;
+          }
+          return await window.ipcRenderer.invoke("selectAreaByReferenceDate", {
+            dataSetResultId,
+            areaGroup,
+            keyCode,
+            referenceDate,
+          });
+        }
+
+        const normalizedAddress = props.normalized_address;
+        if (typeof normalizedAddress !== "string") return null;
+        return await window.ipcRenderer.invoke(
+          "selectBuildingByReferenceDate",
+          {
+            dataSetResultId,
+            normalizedAddress,
+            referenceDate,
+          },
+        );
+      } catch (error) {
+        rendererLogger.error(
+          "Failed to fetch feature by reference date",
+          error,
+          {
+            unit,
+            referenceDate,
+            component: "useFeatureFetcher",
+          },
+        );
+        return null;
+      }
+    },
+    [unit],
+  );
+
+  return { getFeatureById, getFeatureByReferenceDate };
 };

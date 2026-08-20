@@ -198,7 +198,7 @@ class TestEvaluation:
 
 
 class TestOdsFeatureResolution:
-    """_odsサフィックス付きカラム（説明変数追加用データ）の解決テスト"""
+    """_odsサフィックス付きカラム（建物関連データ）の解決テスト"""
 
     def test_resolve_ods_columns_by_exact_name(self):
         """_odsカラムはそのままの名前で解決される"""

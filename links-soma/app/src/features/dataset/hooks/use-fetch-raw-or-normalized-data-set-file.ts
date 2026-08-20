@@ -3,6 +3,7 @@ import {
   type SelectNormalizedDataSet,
   type SelectRawDataSet,
 } from "../../../db/schema";
+import { toDisplayHeaderLine } from "../../../shared/utils/normalized-csv-header";
 
 export type RawOrNormalized = "raw" | "normalized";
 
@@ -51,7 +52,10 @@ const fetcher = async ([id, type, page, limitPerPage]: [
   const uint8Array = new Uint8Array(file);
   const csvString = uint8ArrayToString(uint8Array);
   const rows = csvString.trim().split("\n");
-  const headers = rows[0].split(",").map((header) => header.trim());
+  // 名寄せ済みデータは一部の列名がディスク上で英語のまま残る。表示だけ読み替える（ADR-0029）
+  const headerLine =
+    type === "normalized" ? toDisplayHeaderLine(rows[0]) : rows[0];
+  const headers = headerLine.split(",").map((header) => header.trim());
 
   const totalItems = rows.length - 1; // ヘッダーを除いた行数
   const totalPages = Math.ceil(totalItems / limitPerPage);

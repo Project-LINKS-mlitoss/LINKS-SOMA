@@ -16,7 +16,6 @@ export const dataKeyMapping = {
   water_status: "waterStatus",
   water_usage: "waterUsage",
   building_registry: "buildingRegistry",
-  census: "census",
   building_type_determination: "buildingTypeDetermination",
   geocoding: "geocoding",
   building_polygon: "buildingPolygon",
@@ -40,7 +39,6 @@ const REQUIRED_DATASETS_KEYS: DataKeys[] = [
   "resident_registry",
   "water_status",
   "water_usage",
-  "census",
 ];
 
 // 特殊フォームを持つデータセット

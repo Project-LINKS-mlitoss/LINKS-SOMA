@@ -199,9 +199,7 @@ export async function waitForJobCompletionById(
   }
 
   // eslint-disable-next-line no-console -- E2Eテストの進捗表示
-  console.log(
-    `🔎 [${label}] 詳細画面へ遷移: job/detail/${jobId}/${type}`,
-  );
+  console.log(`🔎 [${label}] 詳細画面へ遷移: job/detail/${jobId}/${type}`);
 
   // === 2. ポーリングループ ===
   const startTime = Date.now();
@@ -475,7 +473,9 @@ export async function verifyNormalizationJoiningRates(
     expectedJoinSteps?: number;
     label?: string;
   } = {},
-): Promise<{ joining_rate: number; input_source?: string; success_rate?: string }[]> {
+): Promise<
+  { joining_rate: number; input_source?: string; success_rate?: string }[]
+> {
   const expected = options.expectedJoinSteps ?? 1;
   const label = options.label ?? "名寄せ";
 
@@ -563,9 +563,7 @@ export async function verifyEstimationResultCount(
     latest.id,
   );
   const buildingCount =
-    typeof countResult === "number"
-      ? countResult
-      : (countResult?.count ?? 0);
+    typeof countResult === "number" ? countResult : (countResult?.count ?? 0);
 
   // eslint-disable-next-line no-console -- E2Eテストの進捗表示
   console.log(
@@ -578,6 +576,34 @@ export async function verifyEstimationResultCount(
   ).toBeGreaterThanOrEqual(minCount);
 
   return { resultId: latest.id, buildingCount };
+}
+
+/**
+ * 推定結果の地域フィルター候補（selectAreaGroups）を unit 別に取得する
+ *
+ * # 何を検証するために使うか
+ *
+ * 地域(area)単位の候補は地域ポリゴン(area_grouping)由来で、ジオコーディングの有無に
+ * 依存しない。建物(building)単位の候補は建物 area_group（推定時の空間結合で付与）に
+ * 依存し、建物 geometry が無い（ジオコーディングなし）と空になる。
+ *
+ * pytest（IF003 統合）はこの分岐をパイプライン内部で検証するが、UI から推定した結果に
+ * 対して `selectAreaGroups` IPC が同じ振る舞いになるか（#1878 建物 area_group 書き戻し /
+ * #1887 地域フィルター空案内の回帰面）はここでしか守れない。
+ */
+export async function fetchAreaGroups(
+  page: Page,
+  resultId: number,
+  unit: "building" | "area",
+): Promise<string[]> {
+  return page.evaluate(
+    async ([id, u]) =>
+      window.ipcRenderer.invoke("selectAreaGroups", {
+        dataSetResultId: id,
+        unit: u,
+      }) as Promise<string[]>,
+    [resultId, unit] as const,
+  );
 }
 
 /**
@@ -603,4 +629,85 @@ export async function generateJobName(
   // "2026/03/17 15:30:00" → "202603171530"
   const dateForName = createdAtText.replace(/[/: ]/g, "").slice(0, 12);
   return `E2Eテスト_${prefix}_${dateForName}`;
+}
+
+/**
+ * 保存済み正規化データセットの出力CSVを読み、ヘッダーとレコードを返す
+ *
+ * # 何のために使うか
+ *
+ * 名寄せ出力の「列」だけでなく「値」を E2E から検証するために使う。
+ * アプリのデータプレビューと同じ IPC 経路（selectNormalizedDataSet →
+ * readDatasetFile）で実ファイルを取得するため、実運用と同じ読み取りを再現する。
+ *
+ * events_json など カンマを含むクォート済みフィールドがあるため、単純な split(",")
+ * ではなくクォートを尊重した CSV パースを行う。
+ *
+ * @param title 対象データセットのタイトル。未指定/不一致なら最新を使う
+ */
+export async function fetchNormalizedDatasetRecords(
+  page: Page,
+  title?: string,
+): Promise<{ headers: string[]; records: Record<string, string>[] }> {
+  return page.evaluate(async (wantName: string | undefined) => {
+    const datasets: Array<{ file_path: string; file_name: string | null }> =
+      await window.ipcRenderer.invoke("selectNormalizedDataSets");
+    if (!Array.isArray(datasets) || datasets.length === 0) {
+      throw new Error("正規化データセットが1件も存在しない");
+    }
+    // created_at 降順で返るため datasets[0] が最新（直前に保存したもの）。
+    // 名前が一致するものがあればそれを優先する。
+    const ds =
+      (wantName && datasets.find((d) => d.file_name === wantName)) ||
+      datasets[0];
+
+    const file = await window.ipcRenderer.invoke("readDatasetFile", {
+      fileName: ds.file_path,
+    });
+    const text = new TextDecoder("utf-8").decode(new Uint8Array(file));
+
+    const parseLine = (line: string): string[] => {
+      const out: string[] = [];
+      let cur = "";
+      let inQuote = false;
+      for (let i = 0; i < line.length; i++) {
+        const c = line[i];
+        if (inQuote) {
+          if (c === '"') {
+            if (line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else {
+              inQuote = false;
+            }
+          } else {
+            cur += c;
+          }
+        } else if (c === '"') {
+          inQuote = true;
+        } else if (c === ",") {
+          out.push(cur);
+          cur = "";
+        } else {
+          cur += c;
+        }
+      }
+      out.push(cur);
+      return out.map((v) => v.replace(/\r$/, "").trim());
+    };
+
+    const lines = text
+      .replace(/^\uFEFF/, "")
+      .replace(/\r\n/g, "\n")
+      .split("\n")
+      .filter((l) => l.length > 0);
+    const headers = parseLine(lines[0]);
+    const records = lines.slice(1).map((l) => {
+      const vals = parseLine(l);
+      const rec: Record<string, string> = {};
+      headers.forEach((h, i) => (rec[h] = vals[i] ?? ""));
+      return rec;
+    });
+    return { headers, records };
+  }, title);
 }

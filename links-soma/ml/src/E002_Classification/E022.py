@@ -34,10 +34,21 @@ try:
         get_rotating_logger,
     )
     from constants import (
+        ERROR_20001,
+        ERROR_20002,
+        ERROR_20003,
+        ERROR_20004,
+        ERROR_20005,
+        ERROR_20006,
         ERROR_20007,
         ERROR_20008,
+        ERROR_FEATURE_TYPE_IF003,
         MAPPING_E022_TO_IF001,
         COLUMNS_TO_LEARN,
+    )
+    from src.preprocessing.import_validation import (
+        find_non_numeric_feature_columns,
+        feature_columns_all_absent,
     )
 except ImportError:
     sys.path.remove(async_tasks_path)
@@ -52,10 +63,21 @@ except ImportError:
         get_rotating_logger,
     )
     from async_tasks.constants import (
+        ERROR_20001,
+        ERROR_20002,
+        ERROR_20003,
+        ERROR_20004,
+        ERROR_20005,
+        ERROR_20006,
         ERROR_20007,
         ERROR_20008,
+        ERROR_FEATURE_TYPE_IF003,
         MAPPING_E022_TO_IF001,
         COLUMNS_TO_LEARN,
+    )
+    from preprocessing.import_validation import (
+        find_non_numeric_feature_columns,
+        feature_columns_all_absent,
     )
 
 
@@ -120,10 +142,14 @@ def read_csv(path: str) -> pd.DataFrame:
         読み込まれたデータフレーム。
     """
     if not os.path.exists(path):
+        # R-054 入力ファイル不在(E-20003)
+        set_error(ERROR_20003)
         raise FileNotFoundError(
             f"File not found: {path} / ファイルが見つかりません: {path}"
         )
     if not path.lower().endswith(".csv"):
+        # R-052 ファイル形式非対応(E-20001)
+        set_error(ERROR_20001)
         raise ValueError(
             f"Not a CSV file: {path} / CSVファイルではありません: {path}"
         )
@@ -136,9 +162,18 @@ def read_csv(path: str) -> pd.DataFrame:
                 f"Warning: The loaded CSV file is empty: {path} / 警告: 読み込まれたCSVファイルが空です: {path}"
             )
         return df
-    except (UnicodeDecodeError, pd.errors.ParserError) as e:
+    except pd.errors.ParserError as e:
+        # R-052 ファイル形式非対応・パース失敗(E-20001)。ParserError は ValueError の派生のため、
+        # 文字コード判別不能(ValueError)より先に捕捉してファイル構造の問題として表面化する。
+        set_error(ERROR_20001)
         raise IOError(
-            f"Failed to read or parse CSV file: {path}. Error: {e} / CSVファイルの読み込みまたは解析に失敗しました: {path}. エラー: {e}"
+            f"Failed to parse CSV file: {path}. Error: {e} / CSVファイルの解析に失敗しました: {path}. エラー: {e}"
+        )
+    except (UnicodeDecodeError, ValueError) as e:
+        # R-053 文字コード判別不能(E-20002)。detect_encoding が検出不能時に ValueError を送出する
+        set_error(ERROR_20002)
+        raise IOError(
+            f"Failed to read CSV file (encoding): {path}. Error: {e} / CSVファイルの文字コード判別に失敗しました: {path}. エラー: {e}"
         )
 
 
@@ -353,6 +388,35 @@ def predict_akiya(
     return df
 
 
+def save_csv_with_encoding_fallback(df: pd.DataFrame, path: str) -> str:
+    """予測結果CSVを保存する。utf-8-sig を主とし、失敗時のみ cp932 を試す。
+
+    FR004-007 R-056/057: 各エンコーディングでの保存失敗を E-20005（保存時エンコーディング失敗・
+    開発者に相談）として記録し、全エンコーディングで保存できなければ E-20006（全保存失敗）を記録して
+    送出する。成功した時点で直前に記録したエラーは解除する（最終的に保存できたため）。
+    E032 等の後段は chardet で文字コードを検出して読むため cp932 フォールバックでも読める。
+    """
+    global ERROR_CODE, ERROR_MSG
+    encodings = ["utf-8-sig", "cp932"]
+    last_exc: Optional[Exception] = None
+    for encoding in encodings:
+        try:
+            df.to_csv(path, index=False, encoding=encoding)
+            ERROR_CODE = None
+            ERROR_MSG = None
+            return encoding
+        except Exception as e:  # 文字コード/IOの保存失敗を1エンコーディング単位で記録
+            last_exc = e
+            # R-056 保存時エンコーディング失敗(E-20005)
+            set_error(ERROR_20005, path, encoding)
+    # R-057 全エンコーディングで保存失敗(E-20006)
+    set_error(ERROR_20006, param_st1=path)
+    raise IOError(
+        f"Failed to save CSV in all encodings {encodings}: {path}. Error: {last_exc} / "
+        f"いずれのエンコーディングでもCSVを保存できませんでした: {path}"
+    )
+
+
 def save_predictions(df: pd.DataFrame, output_dir: str):
     """
     Saves the prediction results to a CSV file.
@@ -379,15 +443,10 @@ def save_predictions(df: pd.DataFrame, output_dir: str):
             )
 
     output_csv_path = os.path.join(output_dir, "predictions.csv")
-    try:
-        df.to_csv(output_csv_path, index=False, encoding="utf-8-sig")
-        print(
-            f"Prediction results saved to {output_csv_path}. / 予測結果が {output_csv_path} に保存されました。"
-        )
-    except IOError as e:
-        raise IOError(
-            f"Failed to save prediction results to file: {output_csv_path}. Error: {e} / 予測結果のファイル保存に失敗しました: {output_csv_path}. エラー: {e}"
-        )
+    save_csv_with_encoding_fallback(df, output_csv_path)
+    print(
+        f"Prediction results saved to {output_csv_path}. / 予測結果が {output_csv_path} に保存されました。"
+    )
 
 
 def main(
@@ -502,13 +561,40 @@ def main(
 
         # カラム調整
         explanatory_values = get_needed_explanatory_columns_list(model)
+        present_cols = [c for c in explanatory_values if c in df.columns]
         if logger:
             logger.info(f"[prepare] Requested explanatory columns: {len(explanatory_values)}")
             missing_cols = [c for c in explanatory_values if c not in df.columns]
             if missing_cols:
                 logger.warning(f"[prepare] Missing columns (will be filled with NA): {missing_cols}")
-            present_cols = [c for c in explanatory_values if c in df.columns]
             logger.info(f"[prepare] Present columns: {len(present_cols)}/{len(explanatory_values)}")
+
+        # FR004-007 R-055: モデルの説明変数が入力に1つも無い(=別データセット)場合は致命停止(E-20004)。
+        # 部分欠損は predict_akiya の median 補完で許容する設計なので、ゼロ一致のみをエラーにする。
+        if feature_columns_all_absent(df.columns, explanatory_values):
+            if logger:
+                logger.error(
+                    f"[validate_features] No model feature columns present in input. "
+                    f"Required: {explanatory_values}"
+                )
+            set_error(ERROR_20004, param_st1="、".join(explanatory_values))
+            raise ValueError(
+                f"モデルの説明変数が入力に1つも存在しません: {explanatory_values}"
+            )
+
+        # FR004-007: 説明変数の型不一致(E-201)を predict_akiya の .to_numpy(dtype=float) が
+        # 不透明にクラッシュする前に検出し、どの列が非数値か＋責任分界(自治体修正)を記録して停止する。
+        bad_feature_cols = find_non_numeric_feature_columns(
+            df, present_cols
+        )
+        if bad_feature_cols:
+            if logger:
+                logger.error(f"[validate_features] Non-numeric feature columns: {bad_feature_cols}")
+            set_error(ERROR_FEATURE_TYPE_IF003, param_st1="、".join(bad_feature_cols))
+            raise ValueError(
+                f"説明変数に数値化できない値が含まれます: {bad_feature_cols}"
+            )
+
         df_prepared = prepare_for_estimation(df, explanatory_values)
 
         if sqlite_enabled and job_id:
@@ -570,9 +656,9 @@ def main(
             # （insert_sqlite内でローカル変数に再バインドされるためdf_predには反映されない）
             if "reference_date" not in df_pred.columns:
                 df_pred["reference_date"] = ""
-            # 各エンコーディングでCSVファイルとして保存を試みる
+            # 各エンコーディングでCSVファイルとして保存を試みる(R-056/057)
             os.makedirs(output_dir, exist_ok=True)
-            df_pred.to_csv(file_path, index=False, encoding='utf-8-sig')
+            save_csv_with_encoding_fallback(df_pred, file_path)
         else:
             # 予測結果の保存
             save_predictions(df_pred, output_dir)
@@ -592,22 +678,33 @@ def main(
         print(f"An error occurred: {e} / エラーが発生しました: {e}")
         if logger:
             logger.error("E022 failed:\n%s", traceback.format_exc())
+        # 記録より先にフォールバック(E-20008)を立てる。順序が逆だと想定外の例外で
+        # ERROR_MSG が None のまま記録され、画面が原因を示せなくなる。
+        if ERROR_CODE is None:
+            set_error(ERROR_20008)
         if task_id is not None:
+            # どの名寄せ済みデータセットで失敗したかを先頭へ添える（推定は生CSVでなく登録済データを読む）
+            error_msg = ERROR_MSG
+            try:
+                from utils import fetch_normalized_dataset_file_names
+                from error_file_context import prepend_file_context, resolve_by_path
+                error_msg = prepend_file_context(
+                    ERROR_MSG,
+                    resolve_by_path(input_path, fetch_normalized_dataset_file_names(), {}),
+                )
+            except Exception:
+                error_msg = ERROR_MSG
             create_or_update_job_task(
                 job_id,
                 progress_percent="",
                 preprocess_type=None,
                 error_code=ERROR_CODE,
-                error_msg=ERROR_MSG,
+                error_msg=error_msg,
                 result=json.dumps({}),
                 id=task_id,
                 is_finish=True,
             )
-        if ERROR_CODE is None:
-            set_error(ERROR_20008)
-            raise Exception(e)
         raise Exception(e)
-        # 必要に応じて sys.exit(1) などでプログラムを終了させる
 
 
 def set_error(value: dict, param_st1: str = None, param_st2: str = None):

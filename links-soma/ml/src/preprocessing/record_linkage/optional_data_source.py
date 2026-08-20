@@ -1,4 +1,4 @@
-"""説明変数追加用データの結合処理
+"""建物関連データの結合処理
 
 ユーザーが名寄せウィザードStep 12で取り込んだCSVを、
 normalized_addressで水道データにleft joinし、
@@ -23,6 +23,7 @@ def merge_optional_data_source(
     cfg: dict | None,
     data_dir: str | Path,
     municipality=None,
+    stats: dict | None = None,
 ) -> pd.DataFrame:
     """追加用データを住所で結合する。
 
@@ -31,6 +32,8 @@ def merge_optional_data_source(
         cfg: param_adapterから受け取った設定dict。Noneなら何もしない。
             {"file": "custom.csv", "columns": {"address": "所在地"}}
         data_dir: CSVファイルの配置ディレクトリ
+        stats: 非Noneのとき結合率算出用の統計を書き込む。
+            sub_rows=追加用データの一意住所数（分母）、matched=水道住所に一致した数（分子）。
 
     Returns:
         _odsサフィックス付きカラムが追加されたDataFrame（left join）
@@ -52,5 +55,12 @@ def merge_optional_data_source(
     keep_cols = ["normalized_address"] + list(rename_map.values())
     ods_df = ods_df[keep_cols]
     ods_df = ods_df.drop_duplicates(subset=["normalized_address"], keep="first")
+
+    # 結合率統計: マッチ先（追加用データ側）の一意住所を分母にする
+    if stats is not None:
+        water_addrs = set(df["normalized_address"].dropna()) - {""}
+        sub_addrs = ods_df.loc[ods_df["normalized_address"] != "", "normalized_address"]
+        stats["sub_rows"] = int(len(sub_addrs))
+        stats["matched"] = int(sub_addrs.isin(water_addrs).sum())
 
     return df.merge(ods_df, on="normalized_address", how="left")

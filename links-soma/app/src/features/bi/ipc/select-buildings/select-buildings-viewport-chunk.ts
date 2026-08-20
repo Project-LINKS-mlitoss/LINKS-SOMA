@@ -14,6 +14,8 @@ export type MinimalBuildingData = {
   id: number;
   bldg_geometry: string | null;
   predicted_probability: number | null;
+  predicted_probability_change_rate_from_oldest: number | null;
+  predicted_probability_change_rate_from_previous: number | null;
   lat_geocoding: number | null;
   lon_geocoding: number | null;
 };
@@ -43,6 +45,10 @@ export const selectBuildingsViewportChunk = ((
         id: data_set_detail_buildings.id,
         bldg_geometry: data_set_detail_buildings.bldg_geometry,
         predicted_probability: data_set_detail_buildings.predicted_probability,
+        predicted_probability_change_rate_from_oldest:
+          data_set_detail_buildings.predicted_probability_change_rate_from_oldest,
+        predicted_probability_change_rate_from_previous:
+          data_set_detail_buildings.predicted_probability_change_rate_from_previous,
         lat_geocoding: data_set_detail_buildings.lat_geocoding,
         lon_geocoding: data_set_detail_buildings.lon_geocoding,
       })

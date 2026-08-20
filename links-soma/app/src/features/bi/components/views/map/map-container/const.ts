@@ -1,5 +1,4 @@
 import type { MapWithTableView } from "../../../../types";
-import type { VacancyLevel } from "../vacancy-level-checkbox/types";
 
 // バッチ処理
 export const BATCH_SIZE = 2000;
@@ -208,6 +207,8 @@ export const CURRENTLY_DISPLAYED_COLUMNS = {
 
   building: [
     "predicted_probability",
+    "predicted_probability_change_rate_from_oldest",
+    "predicted_probability_change_rate_from_previous",
     "normalized_address",
     "household_size",
     "members_under_15",
@@ -220,22 +221,6 @@ export const CURRENTLY_DISPLAYED_COLUMNS = {
     "buildingtype_determination_not_possible_flag",
   ] as const,
 } as const;
-
-export const PREDICTED_PROBABILITY: Record<
-  MapWithTableView["unit"],
-  Record<VacancyLevel, number>
-> = {
-  building: {
-    low: 0,
-    medium: 0.45,
-    high: 0.7,
-  },
-  area: {
-    low: 0,
-    medium: 0.04,
-    high: 0.11,
-  },
-};
 
 /**
  * ポリゴン描画をスキップするズームレベルのしきい値

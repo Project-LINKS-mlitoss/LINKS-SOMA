@@ -8,6 +8,7 @@ import {
   tokens,
 } from "@fluentui/react-components";
 import { MoreVerticalRegular } from "@fluentui/react-icons";
+import { type SelectResultView } from "../../../../db/schema";
 import { Button } from "../../../../shared/components/ui";
 import { useDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { DownloadDialog } from "../dialogs/dialog-download";
@@ -23,6 +24,8 @@ const useStyles = makeStyles({
 });
 
 type Props = {
+  /** ダウンロード対象のビュー（フィルター/カラム編集・件数プレビューに使用） */
+  resultView: SelectResultView;
   /** データダウンロード時のコールバック */
   onDownload: (fileType: string, coordinate: string) => Promise<void>;
   /** ビュー削除時のコールバック */
@@ -34,6 +37,7 @@ type Props = {
 };
 
 export function ViewActionMenu({
+  resultView,
   onDownload,
   onDelete,
   onChartCsvExport,
@@ -79,7 +83,11 @@ export function ViewActionMenu({
           </MenuList>
         </MenuPopover>
       </Menu>
-      <DownloadDialog dialogState={downloadDialogState} onSubmit={onDownload} />
+      <DownloadDialog
+        dialogState={downloadDialogState}
+        onSubmit={onDownload}
+        resultView={resultView}
+      />
       <DeleteDialog dialogState={deleteDialogState} onSubmit={onDelete} />
     </>
   );

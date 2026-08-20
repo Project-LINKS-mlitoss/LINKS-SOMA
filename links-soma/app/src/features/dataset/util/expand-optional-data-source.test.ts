@@ -25,8 +25,8 @@ describe("expandOptionalDataSource", () => {
     const result = expandOptionalDataSource(rows);
 
     expect(result.columns).toEqual([
-      { key: "築年数", label: "築年数(追加)", unit: "" },
-      { key: "接道幅", label: "接道幅(追加)", unit: "" },
+      { key: "築年数", label: "[追加] 築年数", unit: "" },
+      { key: "接道幅", label: "[追加] 接道幅", unit: "" },
     ]);
     expect(result.data[0]).toMatchObject({
       area_group: "A町",
@@ -57,7 +57,7 @@ describe("expandOptionalDataSource", () => {
     const result = expandOptionalDataSource(rows);
 
     expect(result.columns).toEqual([
-      { key: "築年数", label: "築年数(追加)", unit: "" },
+      { key: "築年数", label: "[追加] 築年数", unit: "" },
     ]);
     expect(result.data[0]).toMatchObject({ area_group: "A町", 築年数: 35 });
     expect(result.data[1]).toMatchObject({ area_group: "B町", 築年数: "" });

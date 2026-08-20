@@ -10,11 +10,16 @@ type Params = {
   data: ResultParameters;
 };
 
-/** IF003:空き家推定機能の呼び出し */
+/**
+ * IF003:空き家推定機能の呼び出し
+ *
+ * 成功時は作成したジョブ id を返す。ガイド進行中はこの id を進行状態バッジに使う（ADR-0024）。
+ * 失敗時は null（呼び出し側はジョブ未作成として扱う）。
+ */
 export const evaluateData = (async (
   _: unknown,
   params: Params,
-): Promise<boolean> => {
+): Promise<number | null> => {
   const { data } = params;
 
   try {
@@ -34,7 +39,7 @@ export const evaluateData = (async (
         "Job process start failed",
         new Error("evaluateData: result job failed to start"),
       );
-      return false;
+      return null;
     }
 
     // childProcessに入れてバックグラウンド実行
@@ -56,9 +61,9 @@ export const evaluateData = (async (
 
     setupMLProcessHandlers(cp, jobProcess.data.jobId);
 
-    return true;
+    return jobProcess.data.jobId;
   } catch (error) {
     mainProcessLogger.error("evaluateData failed", error as Error);
-    return false;
+    return null;
   }
 }) satisfies IpcMainListener;

@@ -181,6 +181,11 @@ class CleanData:
         if not isinstance(address, str):
             return address
         try:
+            # 全角・半角スペースを削除
+            # 都道府県名・市区町村名の削除より前に行う。両者は先頭一致で除去するため、
+            # 「愛知県　豊田市　〇〇」のように間に空白があると一致せず市名が residual として残る
+            address = re.sub(r"[\s　]+", "", address)
+
             address = _RE_PREF.sub("", address)
             # 市区町村名を削除（UIから入力された市区町村名を先頭一致で除去）
             # municipality にも住所と同じ正規化（NFKC・ひらがな化）を適用してから照合
@@ -189,7 +194,6 @@ class CleanData:
                     unicodedata.normalize("NFKC", municipality)
                 )
                 address = re.sub("^" + re.escape(normalized_municipality), "", address)
-            address = re.sub(r"[\s　]+", "", address)
             address = re.sub(r"[－—―−\u2010\u2011\u2012\u2013\u2014\u2015]", "-", address)
 
             # 丁目: kanji numerals → digits, then 丁目 → hyphen

@@ -76,10 +76,14 @@ export const FormFilterCondition = ({
   });
   const { fields, update, remove, replace } = filterConditionField;
 
-  /** フォーカス切り替え時にダイアログに反映させるため */
+  // 保存済みの詳細条件が変わったらダイアログの field array に同期する。
+  // currentFilterCondition は親の再レンダーごとに新しい .filter() 配列（identity 変化）に
+  // なるため、identity 依存だと毎レンダー replace が走り編集中の条件を巻き戻す。値で比較する。
+  const currentFilterConditionKey = JSON.stringify(currentFilterCondition);
   useEffect(() => {
     replace(currentFilterCondition);
-  }, [currentFilterCondition, replace]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- currentFilterCondition は key で値比較
+  }, [currentFilterConditionKey]);
 
   const { watch, setValue: setEditViewFormValue } =
     useFormContext<EditViewFormType>();

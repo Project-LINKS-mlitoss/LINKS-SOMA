@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 import sys
 import traceback
 
@@ -154,7 +155,46 @@ class Summarization:
         )
 
         return summerized_gdf
-    
+
+    def update_buildings_area_group(self, spatial_join_gdf):
+        """
+        空間結合済みデータ（建物1行ごとに area_group/key_code を保持）から
+        data_set_detail_buildings.area_group / key_code を正規化住所で更新する。
+
+        地域集計と同一の sjoin 由来のため、建物単位の地域フィルターは
+        地域集計の定義（重心が属する地域）と一致する。どの地域ポリゴンにも
+        属さない建物（inner join で除外）は area_group=NULL のままで、
+        地域集計からも除外される建物と整合する。
+        """
+        # key_column が list 形式（[key_code, area_group]）のときのみ建物を更新する。
+        # 文字列形式では area_group カラムを一意に特定できないためスキップ。
+        if not isinstance(self.key_column, list) or len(self.key_column) < 2:
+            return 0
+
+        key_code_col = self.key_column[0]
+        area_group_col = self.key_column[1]
+        address_col = self.INPUT_COLUMNS["akiya_pred"]["normalized_address"]
+
+        for col in (address_col, area_group_col, key_code_col):
+            if col not in spatial_join_gdf.columns:
+                return 0
+
+        # area_group は地理属性のため、同一住所は同一地域。住所単位で一意化する
+        pairs = spatial_join_gdf[
+            [address_col, area_group_col, key_code_col]
+        ].drop_duplicates(subset=[address_col])
+
+        rows = [
+            (
+                None if pd.isna(r[area_group_col]) else str(r[area_group_col]),
+                None if pd.isna(r[key_code_col]) else str(r[key_code_col]),
+                str(r[address_col]),
+            )
+            for _, r in pairs.iterrows()
+            if pd.notna(r[address_col]) and r[address_col] != ""
+        ]
+        return update_buildings_area_group(rows, self.data_set_result_id)
+
     def remove_z_coordinate(self, geometry):
         """
         ジオメトリからZ座標（高さ情報）を除去する関数。
@@ -362,7 +402,7 @@ class Summarization:
                 if file_extension == '.csv':
                     return pd.read_csv(path, encoding=detected_encoding, **kwargs)
                 else:
-                    return gpd.read_file(path, encoding=encoding)
+                    return gpd.read_file(path, encoding=detected_encoding)
             
             # 適切なエンコーディングが見つからない場合、エラーを発生させる
             set_error(ERROR_00025, path)
@@ -395,18 +435,18 @@ class Summarization:
         # city_block のファイル形式に応じて読み込み
         if "shp" in self.INPUT_PATHS["city_block"]:
             try:
-                city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
+                city_block_gdf = read_boundary_polygon(self.INPUT_PATHS["city_block"])
             except:
                 set_error(ERROR_20017)
                 raise("地域集計用データ（Shapefile形式）に不備がある場合")
         elif "gpkg" in self.INPUT_PATHS["city_block"]:
             try:
-                city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
+                city_block_gdf = read_boundary_polygon(self.INPUT_PATHS["city_block"])
             except:
                 set_error(ERROR_20016)
                 raise("地域集計用データ（gpkg形式）に不備がある場合")
         elif "geojson" in self.INPUT_PATHS["city_block"]:
-            city_block_gdf = self.read_file(self.INPUT_PATHS["city_block"])
+            city_block_gdf = read_boundary_polygon(self.INPUT_PATHS["city_block"])
         elif "csv" in self.INPUT_PATHS["city_block"]:
             city_block_df = self.read_file(self.INPUT_PATHS["city_block"])
 
@@ -446,6 +486,15 @@ class Summarization:
             # insert sqlite
             if self.data_set_result_id != 0:
                 self.insert_data_set_detail_areas(summerized_gdf, self.data_set_result_id, self.key_column)
+                # 地域集計と同一の sjoin 由来で建物にも area_group を付与する。
+                # これにより建物単位の地域フィルターが地域集計の定義と一致する。
+                # 建物タグ付けは補助情報のため、失敗しても主出力（予測・地域集計）は
+                # 既にコミット済み。推定を止めず、エラーは可視化する。
+                try:
+                    self.update_buildings_area_group(spatial_join_gdf)
+                except Exception as building_update_error:
+                    print(f"update_buildings_area_group failed: {building_update_error}")
+                    traceback.print_exc()
             else:
                 summerized_gdf.to_csv(self.OUTPUT_PATH, encoding="utf-8-sig", index=False)
         except Exception as e:
@@ -475,6 +524,77 @@ def detect_encoding(file_path):
     # エンコーディングを検出して返す
     result = chardet.detect(raw_data)
     return result['encoding']
+
+
+def _is_readable_japanese(value) -> bool:
+    """
+    境界ポリゴンの S_NAME 値が「可読な日本語」かどうかを判定する。
+
+    GDAL/fiona は誤ったエンコーディングで .dbf を読んでも例外を出さず、
+    生バイトを hex 文字列にしたり U+FFFD 置換文字を含む文字列を黙って返すことがある
+    （SJIS 境界データで .cpg が無い場合に発生。GDAL バージョン差で崩れ方が変わる）。
+    そのため「読めた文字列が妥当な日本語か」を内容で検証する。
+    （E016.read_boundary_polygon と同型。3 箇所目が出たら共通モジュールへ抽出する）
+    """
+    if not isinstance(value, str) or value == "":
+        return False
+    if "�" in value:
+        return False
+    if re.fullmatch(r"[0-9a-fA-F]{6,}", value):
+        return False
+    cjk_pattern = re.compile(r"[぀-ヿ㐀-䶿一-鿿豈-﫿]")
+    return bool(cjk_pattern.search(value))
+
+
+def read_boundary_polygon(path):
+    """
+    地域集計用の境界ポリゴン（Shapefile / GeoPackage / GeoJSON）を読み込む。
+
+    属性テーブル（.dbf）が Shift-JIS(cp932) で .cpg が無いケースに対応するため、
+    「複数エンコーディングで読み取り → S_NAME が可読日本語か検証 → 妥当な結果を採用」
+    の検出＋検証＋フォールバック方式をとる。cp932 を無条件ハードコードはしない。
+
+    旧実装は read_file() で encoding='utf-8-sig' を先に強制しており、SJIS 境界では
+    例外/文字化けとなり地域名称(area_group)が崩れていた（E032 が地域名称の出所）。
+
+    Returns
+    -------
+    GeoDataFrame | None
+        読み込んだ境界ポリゴン。全エンコーディングで読めなければ None。
+    """
+    candidate_encodings = []
+    try:
+        detected = detect_encoding(path)
+    except Exception:
+        detected = None
+    if detected:
+        candidate_encodings.append(detected)
+    for enc in ["utf-8", "cp932", "shift_jis", "euc_jp"]:
+        if enc not in candidate_encodings:
+            candidate_encodings.append(enc)
+    # None = SHAPE_ENCODING を上書きしない（.cpg 付き・GeoPackage はこれで正しく読める）
+    candidate_encodings.append(None)
+
+    last_gdf = None
+    for enc in candidate_encodings:
+        try:
+            if enc is None:
+                gdf = gpd.read_file(path)
+            else:
+                with fiona.Env(SHAPE_ENCODING=enc):
+                    gdf = gpd.read_file(path)
+        except Exception:
+            continue
+
+        last_gdf = gdf
+        if "S_NAME" not in gdf.columns:
+            return gdf
+        sample = gdf["S_NAME"].dropna().head(50)
+        if len(sample) == 0 or sample.map(_is_readable_japanese).any():
+            return gdf
+
+    return last_gdf
+
 
 def move_uploaded_file(file, save_dir):
     # 保存先のディレクトリを作成
@@ -512,6 +632,9 @@ def extract_zip(zip_file, extract_to):
 
 def process_summarization(akiya_pred_file, spatial_file, output_dir, key_column, job_id=None, db_path=None, process=0, data_set_result_id=0, logs_dir=None):
     logger = None
+    # task_id は except でも参照する。try の内側で束縛すると、ロガー初期化や接続で
+    # 失敗したときに except 自身が UnboundLocalError で落ち、エラーを記録できなくなる。
+    task_id = None
     try:
         # Initialize logger if logs_dir is provided
         if logs_dir:
@@ -523,7 +646,6 @@ def process_summarization(akiya_pred_file, spatial_file, output_dir, key_column,
         
         if db_path:
             connect_sqllite(db_path)
-        task_id = None
         process = (process/3)
         process_init = process
         if job_id:

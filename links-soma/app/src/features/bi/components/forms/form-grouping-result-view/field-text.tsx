@@ -28,6 +28,8 @@ type Props = {
   operationRegister: Record<string, unknown>;
   valueRegister: Record<string, unknown>;
   handleRemove: () => void;
+  /** 優先順位の表示と並べ替え操作。行の先頭に配置する */
+  priority: JSX.Element;
 };
 
 export const FieldText = ({
@@ -36,12 +38,14 @@ export const FieldText = ({
   operationRegister,
   valueRegister,
   handleRemove,
+  priority,
 }: Props): JSX.Element => {
   const styles = useStyles();
   if (field.value.referenceColumnType !== "text") return <></>;
 
   return (
     <Field className={styles.groupField}>
+      {priority}
       <Input
         className={styles.inputLabelValue}
         defaultValue={field.value.label}

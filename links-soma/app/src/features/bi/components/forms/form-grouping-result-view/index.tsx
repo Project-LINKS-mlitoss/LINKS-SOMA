@@ -19,11 +19,13 @@ import {
   isGroupCondition,
   type Parameter,
 } from "../../../types/models/parameter";
+import { lang } from "../../../../../shared/config/lang";
 import { useFormGroupingResultView } from "../../../hooks";
 import { FieldBoolean } from "./field-boolean";
 import { FieldText } from "./field-text";
 import { FieldDate } from "./field-date";
 import { FieldNumber } from "./field-number";
+import { PriorityControl } from "./priority-control";
 
 const useStyles = makeStyles({
   appendButtonField: {
@@ -48,6 +50,11 @@ const useStyles = makeStyles({
   },
   textRight: {
     textAlign: "right",
+  },
+  unmatchedNote: {
+    display: "block",
+    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalXXL}`,
+    color: tokens.colorNeutralForeground2,
   },
 });
 
@@ -74,7 +81,7 @@ export const FormGroupingResultView = ({
   const styles = useStyles();
 
   const {
-    fieldArray: { fields, update },
+    fieldArray: { fields, update, swap },
     handleAppend,
     handleSave,
     handleRemove,
@@ -120,97 +127,117 @@ export const FormGroupingResultView = ({
                     <Button onClick={handleAppend}>追加</Button>
                   </div>
                 ) : (
-                  fields.map((field, index) => {
-                    if (field.type !== "group") return null;
+                  <>
+                    {fields.map((field, index) => {
+                      if (field.type !== "group") return null;
 
-                    /** columnタイプ別にフィールドを分岐 */
-                    switch (field.value.referenceColumnType) {
-                      case "boolean":
-                        return (
-                          <FieldBoolean
-                            key={field.id}
-                            field={field}
-                            handleRemove={() => handleRemove(index)}
-                            labelRegister={formRegister(
-                              `parameters.${index}.value.label`,
-                            )}
-                            operationRegister={formRegister(
-                              `parameters.${index}.value.operation`,
-                            )}
-                          />
-                        );
-                      case "text":
-                        return (
-                          <FieldText
-                            key={field.id}
-                            field={field}
-                            handleRemove={() => handleRemove(index)}
-                            labelRegister={formRegister(
-                              `parameters.${index}.value.label`,
-                            )}
-                            operationRegister={formRegister(
-                              `parameters.${index}.value.operation`,
-                            )}
-                            valueRegister={formRegister(
-                              `parameters.${index}.value.value`,
-                            )}
-                          />
-                        );
-                      case "date":
-                      case "dateRange":
-                        return (
-                          <FieldDate
-                            key={field.id}
-                            field={field}
-                            handleRemove={() => handleRemove(index)}
-                            index={index}
-                            register={formRegister}
-                          />
-                        );
-                      case "float":
-                      case "integer":
-                      case "floatRange":
-                      case "integerRange":
-                        return (
-                          <FieldNumber
-                            key={field.id}
-                            field={field}
-                            handleRemove={() => handleRemove(index)}
-                            index={index}
-                            register={formRegister}
-                            unit={unit}
-                            update={(e) => {
-                              const referenceColumnType =
-                                e.target.value === "range"
-                                  ? field.value.referenceColumnType + "Range"
-                                  : field.value.referenceColumnType.replace(
-                                      "Range",
-                                      "",
-                                    );
-                              update(index, {
-                                key: field.key,
-                                value: {
-                                  ...field.value,
-                                  // @ts-expect-error - ここで型が変わるためエラーになる
-                                  operation: e.target.value,
-                                  // @ts-expect-error - 解決できない
-                                  referenceColumnType,
-                                },
-                                type: "group",
-                              });
-                            }}
-                          />
-                        );
+                      const priority = (
+                        <PriorityControl
+                          index={index}
+                          onMoveDown={() => swap(index, index + 1)}
+                          onMoveUp={() => swap(index, index - 1)}
+                          total={fields.length}
+                        />
+                      );
 
-                      default:
-                        return null;
-                    }
-                  })
+                      /** columnタイプ別にフィールドを分岐 */
+                      switch (field.value.referenceColumnType) {
+                        case "boolean":
+                          return (
+                            <FieldBoolean
+                              key={field.id}
+                              field={field}
+                              handleRemove={() => handleRemove(index)}
+                              labelRegister={formRegister(
+                                `parameters.${index}.value.label`,
+                              )}
+                              operationRegister={formRegister(
+                                `parameters.${index}.value.operation`,
+                              )}
+                              priority={priority}
+                            />
+                          );
+                        case "text":
+                          return (
+                            <FieldText
+                              key={field.id}
+                              field={field}
+                              handleRemove={() => handleRemove(index)}
+                              labelRegister={formRegister(
+                                `parameters.${index}.value.label`,
+                              )}
+                              operationRegister={formRegister(
+                                `parameters.${index}.value.operation`,
+                              )}
+                              priority={priority}
+                              valueRegister={formRegister(
+                                `parameters.${index}.value.value`,
+                              )}
+                            />
+                          );
+                        case "date":
+                        case "dateRange":
+                          return (
+                            <FieldDate
+                              key={field.id}
+                              field={field}
+                              handleRemove={() => handleRemove(index)}
+                              index={index}
+                              priority={priority}
+                              register={formRegister}
+                            />
+                          );
+                        case "float":
+                        case "integer":
+                        case "floatRange":
+                        case "integerRange":
+                          return (
+                            <FieldNumber
+                              key={field.id}
+                              field={field}
+                              handleRemove={() => handleRemove(index)}
+                              index={index}
+                              priority={priority}
+                              register={formRegister}
+                              unit={unit}
+                              update={(e) => {
+                                const referenceColumnType =
+                                  e.target.value === "range"
+                                    ? field.value.referenceColumnType + "Range"
+                                    : field.value.referenceColumnType.replace(
+                                        "Range",
+                                        "",
+                                      );
+                                update(index, {
+                                  key: field.key,
+                                  value: {
+                                    ...field.value,
+                                    // @ts-expect-error - ここで型が変わるためエラーになる
+                                    operation: e.target.value,
+                                    // @ts-expect-error - 解決できない
+                                    referenceColumnType,
+                                  },
+                                  type: "group",
+                                });
+                              }}
+                            />
+                          );
+
+                        default:
+                          return null;
+                      }
+                    })}
+                  </>
                 )}
                 {fields.length !== 0 && (
-                  <div className={styles.appendButtonField}>
-                    <Button onClick={handleAppend}>追加</Button>
-                  </div>
+                  <>
+                    <div className={styles.appendButtonField}>
+                      <Button onClick={handleAppend}>追加</Button>
+                    </div>
+                    <Caption1 className={styles.unmatchedNote}>
+                      {lang.components.resultView.labelGroupUnmatchedNote}
+                    </Caption1>
+                  </>
                 )}
               </div>
             </DialogContent>

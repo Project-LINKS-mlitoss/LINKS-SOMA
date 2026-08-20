@@ -5,3 +5,4 @@ export * from "./create-default-pie-group-parameters";
 export * from "./float-top";
 export * from "./map";
 export * from "./threshold-column-utils";
+export * from "./chart-aggregation";

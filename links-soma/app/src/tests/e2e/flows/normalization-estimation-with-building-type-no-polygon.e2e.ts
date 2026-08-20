@@ -1,5 +1,5 @@
 /**
- * 推定対象選定用データあり + 建物ポリゴンなしの名寄せ・推定 E2Eテスト
+ * 処理対象選定用データあり + 建物ポリゴンなしの名寄せ・推定 E2Eテスト
  *
  * test-matrix.md N13 対応。
  * - DT213 (geocoding): select
@@ -66,8 +66,8 @@ test.afterAll(async () => {
 /** 保存時に使う固定名（建物種別あり・ポリゴンなしテスト用） */
 const SAVED_DATASET_NAME = "E2Eテスト_建物種別ありポリゴンなし";
 
-test.describe("推定対象選定用データあり・ポリゴンなし名寄せ・推定処理", () => {
-  test("推定対象選定用データあり・ポリゴンなしで名寄せ処理が完了すること", async () => {
+test.describe("処理対象選定用データあり・ポリゴンなし名寄せ・推定処理", () => {
+  test("処理対象選定用データあり・ポリゴンなしで名寄せ処理が完了すること", async () => {
     test.setTimeout(3600000);
 
     await startNormalizationWizard(page);
@@ -128,7 +128,7 @@ test.describe("推定対象選定用データあり・ポリゴンなし名寄�
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

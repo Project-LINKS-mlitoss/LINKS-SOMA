@@ -1,9 +1,14 @@
 import { Caption1Strong, makeStyles, tokens } from "@fluentui/react-components";
 import { useFetchJobTasks } from "../hooks/use-fetch-job-tasks";
+import { formatInputSource } from "../util/input-source";
+import { ErrorDetailView } from "./error-detail-view";
 
 const useStyles = makeStyles({
   li: {
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    display: "flex",
+    flexDirection: "column",
+    rowGap: tokens.spacingVerticalXXS,
   },
 });
 
@@ -19,18 +24,19 @@ export const ErrorJobTaskInfo = ({ jobId }: Props): JSX.Element => {
   return (
     <>
       {data.map((task) => {
+        if (!task.error_msg) return null;
+        const errorDetail = task.result?.error_detail;
         return (
-          task.error_msg && (
-            <li key={task.id} className={styles.li}>
-              <Caption1Strong>
-                {task.error_msg}
-                {task.result?.taskResultType === "preprocess" &&
-                task.result.input_source
-                  ? `(${task.result.input_source.join(", ")})`
-                  : ""}
-              </Caption1Strong>
-            </li>
-          )
+          <li key={task.id} className={styles.li}>
+            <Caption1Strong>
+              {task.error_msg}
+              {task.result?.taskResultType === "preprocess" &&
+              formatInputSource(task.result.input_source)
+                ? `(${formatInputSource(task.result.input_source)})`
+                : ""}
+            </Caption1Strong>
+            {errorDetail && <ErrorDetailView detail={errorDetail} />}
+          </li>
         );
       })}
     </>

@@ -13,6 +13,9 @@ import {
   DialogContent,
   DialogActions,
 } from "../../../../shared/components/ui";
+import { lang } from "../../../../shared/config/lang";
+
+const t = lang.components.draftConfirm;
 
 const useStyles = makeStyles({
   content: {
@@ -32,6 +35,8 @@ const useStyles = makeStyles({
   description: {
     textAlign: "center",
     color: tokens.colorNeutralForeground2,
+    // lang 側の文言に含む改行 (\n) をそのまま反映する。
+    whiteSpace: "pre-line",
   },
 });
 
@@ -44,6 +49,18 @@ type Props = {
   onNewCreate: () => void;
   /** ダイアログを閉じるハンドラ */
   onClose: () => void;
+  /**
+   * この下書きが進行中/中断中ガイドに参照されているか。
+   * true のとき新規作成の結果が重い（下書き削除＋ガイド進行リセット）ため、
+   * 文言を強めて 1 枚で伝える（別途ガイド終了確認を重ねない）。
+   */
+  guideReferenced?: boolean;
+  /**
+   * ダイアログの発火経路。
+   * - "resume"（既定）: 名寄せ一覧の「始める」。続ける/新規作成を提示。
+   * - "modelTraining": モデル構築画面の導線（新規開始専用）。続けるは出さず、新規作成/キャンセルを提示。
+   */
+  mode?: "resume" | "modelTraining";
 };
 
 export const DialogDraftConfirm = ({
@@ -51,33 +68,50 @@ export const DialogDraftConfirm = ({
   onContinue,
   onNewCreate,
   onClose,
+  guideReferenced = false,
+  mode = "resume",
 }: Props): JSX.Element => {
   const styles = useStyles();
+  const isModelTraining = mode === "modelTraining";
+  const body = isModelTraining
+    ? t.bodyModelTraining
+    : guideReferenced
+      ? t.bodyGuideReferenced
+      : t.body;
 
   return (
     <Dialog onOpenChange={(_, data) => !data.open && onClose()} open={open}>
       <DialogSurface>
         <DialogBody>
-          <DialogTitle>下書きがあります</DialogTitle>
+          <DialogTitle>{t.title}</DialogTitle>
           <DialogContent>
             <div className={styles.content}>
               <div className={styles.iconContainer}>
                 <DocumentEdit24Regular className={styles.icon} />
               </div>
-              <p className={styles.description}>
-                保存された下書きがあります。続けて編集しますか？
-                <br />
-                新規作成を選択すると、下書きは削除されます。
-              </p>
+              <p className={styles.description}>{body}</p>
             </div>
           </DialogContent>
           <DialogActions>
-            <Button appearance="outline" onClick={onNewCreate}>
-              新規作成
-            </Button>
-            <Button appearance="primary" onClick={onContinue}>
-              続ける
-            </Button>
+            {isModelTraining ? (
+              <>
+                <Button appearance="outline" onClick={onClose}>
+                  {t.cancel}
+                </Button>
+                <Button appearance="primary" onClick={onNewCreate}>
+                  {t.newCreate}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button appearance="outline" onClick={onNewCreate}>
+                  {t.newCreate}
+                </Button>
+                <Button appearance="primary" onClick={onContinue}>
+                  {t.continue}
+                </Button>
+              </>
+            )}
           </DialogActions>
         </DialogBody>
       </DialogSurface>

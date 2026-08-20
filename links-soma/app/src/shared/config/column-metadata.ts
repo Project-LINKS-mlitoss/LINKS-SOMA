@@ -43,9 +43,15 @@ export type BUILDING_DATASET_COLUMN = keyof Pick<
   | "river_flooding_risk_depth"
   | "landslide_risk_description"
   | "predicted_probability"
+  | "predicted_probability_change_rate_from_oldest"
+  | "predicted_probability_change_rate_from_previous"
   | "predicted_label"
+  | "is_vacant"
+  | "vacant_type"
+  | "vacant_source"
+  | "vacant_year"
+  | "address_precision_flag"
   | "buildingtype_determination_not_possible_flag"
-  | "days_since_registration_event"
   | "address"
   | "area_classification_type"
   | "bldg_dm_attribute"
@@ -108,7 +114,9 @@ export type BUILDING_DATASET_COLUMN = keyof Pick<
   | "river_flooding_risk_duration"
   | "river_flooding_risk_duration_uom"
   | "registration_date"
-  | "date_registration_event"
+  | "building_age_years"
+  | "years_since_inheritance"
+  | "years_since_extension"
   | "waterusage_11to12m_ago"
   | "waterusage_9to10m_ago"
   | "waterusage_7to8m_ago"
@@ -132,10 +140,6 @@ export type BUILDING_DATASET_COLUMN = keyof Pick<
   | "flag_wood"
   | "flag_earthen"
   | "flag_otherstructures"
-  | "flag_inheritance"
-  | "flag_gift"
-  | "flag_sale"
-  | "flag_seizure"
   // 水道時系列特徴量
   | "has_usage_data"
   | "num_zero_periods"
@@ -272,8 +276,56 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       groupable: true,
       unit: "%",
     },
+    predicted_probability_change_rate_from_oldest: {
+      label: translateColumnToJapanese(
+        "predicted_probability_change_rate_from_oldest",
+        "building",
+      ),
+      type: "float",
+      groupable: true,
+      unit: "%",
+    },
+    predicted_probability_change_rate_from_previous: {
+      label: translateColumnToJapanese(
+        "predicted_probability_change_rate_from_previous",
+        "building",
+      ),
+      type: "float",
+      groupable: true,
+      unit: "%",
+    },
     predicted_label: {
       label: translateColumnToJapanese("predicted_label", "building"),
+      type: "boolean",
+      groupable: true,
+      unit: "",
+    },
+    is_vacant: {
+      label: translateColumnToJapanese("is_vacant", "building"),
+      type: "boolean",
+      groupable: true,
+      unit: "",
+    },
+    vacant_type: {
+      label: translateColumnToJapanese("vacant_type", "building"),
+      type: "text",
+      groupable: true,
+      unit: "",
+    },
+    vacant_source: {
+      label: translateColumnToJapanese("vacant_source", "building"),
+      type: "text",
+      groupable: true,
+      unit: "",
+    },
+    vacant_year: {
+      label: translateColumnToJapanese("vacant_year", "building"),
+      type: "text",
+      groupable: true,
+      unit: "",
+    },
+    address_precision_flag: {
+      label: translateColumnToJapanese("address_precision_flag", "building"),
       type: "boolean",
       groupable: true,
       unit: "",
@@ -373,15 +425,6 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       type: "boolean",
       groupable: true,
       unit: "",
-    },
-    days_since_registration_event: {
-      label: translateColumnToJapanese(
-        "days_since_registration_event",
-        "building",
-      ),
-      type: "integer",
-      groupable: true,
-      unit: "日",
     },
     address: {
       label: translateColumnToJapanese("address", "building"),
@@ -815,11 +858,23 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       groupable: true,
       unit: "",
     },
-    date_registration_event: {
-      label: translateColumnToJapanese("date_registration_event", "building"),
-      type: "date",
+    building_age_years: {
+      label: translateColumnToJapanese("building_age_years", "building"),
+      type: "integer",
       groupable: true,
-      unit: "",
+      unit: "年",
+    },
+    years_since_inheritance: {
+      label: translateColumnToJapanese("years_since_inheritance", "building"),
+      type: "integer",
+      groupable: true,
+      unit: "年",
+    },
+    years_since_extension: {
+      label: translateColumnToJapanese("years_since_extension", "building"),
+      type: "integer",
+      groupable: true,
+      unit: "年",
     },
     waterusage_11to12m_ago: {
       label: translateColumnToJapanese("waterusage_11to12m_ago", "building"),
@@ -966,30 +1021,6 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       groupable: true,
       unit: "",
     },
-    flag_inheritance: {
-      label: translateColumnToJapanese("flag_inheritance", "building"),
-      type: "boolean",
-      groupable: true,
-      unit: "",
-    },
-    flag_gift: {
-      label: translateColumnToJapanese("flag_gift", "building"),
-      type: "boolean",
-      groupable: true,
-      unit: "",
-    },
-    flag_sale: {
-      label: translateColumnToJapanese("flag_sale", "building"),
-      type: "boolean",
-      groupable: true,
-      unit: "",
-    },
-    flag_seizure: {
-      label: translateColumnToJapanese("flag_seizure", "building"),
-      type: "boolean",
-      groupable: true,
-      unit: "",
-    },
     // 水道時系列特徴量
     has_usage_data: {
       label: translateColumnToJapanese("has_usage_data", "building"),
@@ -1010,7 +1041,10 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       unit: "",
     },
     usage_data_unavailable_flag: {
-      label: translateColumnToJapanese("usage_data_unavailable_flag", "building"),
+      label: translateColumnToJapanese(
+        "usage_data_unavailable_flag",
+        "building",
+      ),
       type: "boolean",
       groupable: true,
       unit: "",
@@ -1028,7 +1062,10 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
       unit: "",
     },
     usage_half_year_change_rate: {
-      label: translateColumnToJapanese("usage_half_year_change_rate", "building"),
+      label: translateColumnToJapanese(
+        "usage_half_year_change_rate",
+        "building",
+      ),
       type: "float",
       groupable: true,
       unit: "",
@@ -1041,7 +1078,10 @@ export const BUILDING_DATASET_COLUMN_METADATA: ColumnMetadata<BUILDING_DATASET_C
     },
     // 住基イベント特徴量
     max_age_juki_residence_isnull: {
-      label: translateColumnToJapanese("max_age_juki_residence_isnull", "building"),
+      label: translateColumnToJapanese(
+        "max_age_juki_residence_isnull",
+        "building",
+      ),
       type: "boolean",
       groupable: true,
       unit: "",

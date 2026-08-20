@@ -1,0 +1,1 @@
+ALTER TABLE `view_templates` ADD `description` text;

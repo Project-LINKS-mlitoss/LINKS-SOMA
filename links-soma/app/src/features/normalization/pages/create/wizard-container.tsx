@@ -6,8 +6,11 @@
 import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useSWRConfig } from "swr";
-import { makeStyles, tokens } from "@fluentui/react-components";
-import { useFormNormalization } from "../../hooks/use-form-normalization";
+import { makeStyles, mergeClasses, tokens } from "@fluentui/react-components";
+import {
+  useFormNormalization,
+  type NormalizationPurpose,
+} from "../../hooks/use-form-normalization";
 import {
   type PreprocessParameters,
   type JoinCheckTarget,
@@ -16,6 +19,8 @@ import {
 import { type JoinCheckTaskResult } from "../../../../shared/types/job-task-result";
 import { type SelectJobTask } from "../../../../db/schema";
 import { rendererLogger } from "../../../../shared/utils/renderer-logger";
+import { normalizationPurposeLabel } from "../../../../shared/config/normalization-purpose-label";
+import { tutorialStore, useTutorial } from "../../../../shared/tutorial/store";
 import { notifyJobChanged } from "../../../job/hooks/job-change-notifier";
 import { useWizardState } from "./use-wizard-state";
 import { WizardHeader } from "./wizard-header";
@@ -38,11 +43,16 @@ const useStyles = makeStyles({
   },
   body: {
     display: "grid",
-    gridTemplateColumns: "1fr 320px",
+    // 右サイドパネルはマニュアル・ヒント（取得方法/必要カラム/注意）を載せるため広めに取る。
+    gridTemplateColumns: "1fr 400px",
     gap: tokens.spacingHorizontalL,
     flex: 1,
     overflow: "hidden",
     minHeight: 0,
+  },
+  // intro はサイドパネルを出さず全幅1カラム（進め方→揃えるデータを一つの読み筋にする）。
+  bodyFull: {
+    gridTemplateColumns: "1fr",
   },
   main: {
     overflowY: "auto",
@@ -65,6 +75,8 @@ type Props = {
   isDraft?: boolean;
   /** 初期手動スキップ状態（下書き再開時） */
   initialManuallySkippedSteps?: number[];
+  /** 新規開始時の初期目的（モデル構築画面からの導線で指定）。下書き/再実行では無視。 */
+  initialPurpose?: NormalizationPurpose;
 };
 
 export const WizardContainer = ({
@@ -75,6 +87,7 @@ export const WizardContainer = ({
   initialStep,
   isDraft = false,
   initialManuallySkippedSteps,
+  initialPurpose,
 }: Props): JSX.Element => {
   const styles = useStyles();
   const navigate = useNavigate();
@@ -84,6 +97,9 @@ export const WizardContainer = ({
   // pub/sub (`notifyJobChanged`) 側を使う (ADR-0020)。両者は別経路で共存する。
   const { mutate } = useSWRConfig();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // 「開始する」を押して必須未充足でブロックしたか。確認画面の検証表示を押下時に出すため
+  // （推定・モデル構築と同じく、送信を試みて初めて検証メッセージを見せる）。
+  const [submitAttempted, setSubmitAttempted] = useState(false);
   const [isJoinRateDialogOpen, setIsJoinRateDialogOpen] = useState(false);
   const [configuredDatasets, setConfiguredDatasets] = useState<
     JoinCheckTarget[]
@@ -106,10 +122,45 @@ export const WizardContainer = ({
   // フォーム状態（既存のフックを使用）
   const form = useFormNormalization({
     defaultValues: preprocessParameters,
+    initialPurpose,
   });
 
+  // 目的。intro での選択に応じて必須性・説明文を出し分ける。
+  const purpose = form.watch("settings.purpose");
+
   // ウィザード状態
-  const wizard = useWizardState({ initialStep, initialManuallySkippedSteps });
+  const wizard = useWizardState({
+    initialStep,
+    initialManuallySkippedSteps,
+    purpose,
+  });
+
+  // ガイドの phase/stage を購読する。ウィザードが既にマウント済みのままガイドを
+  // (再)起動しても resumeState を詰め直せるよう、store 変化に反応させる。
+  const { phase: tutorialPhase, stage: tutorialStage } = useTutorial();
+
+  // ガイド進行中のみ: 名寄せの draft 参照と該当ステップを tutorial_state に同期する。
+  // 中断/離脱後に「続きへ」で該当ステップへ deep-link するための復元情報 (ADR-0024)。
+  // begin() は resumeState を null 化するため、同一ルートで再起動されても（＝ウィザードが
+  // 再マウントされず step 系 dep が変化しなくても）phase 遷移を dep に含めて詰め直す。
+  useEffect(() => {
+    if (tutorialPhase !== "running" || tutorialStage !== "normalization")
+      return;
+    if (jobId != null) tutorialStore.setDraftJobId(jobId);
+    tutorialStore.setResumeState({
+      stage: "normalization",
+      step: wizard.currentStep,
+      // ステップ種別・対象名も同期し、ガイドが「今どの入力か」を名指しで案内できるようにする。
+      stepType: wizard.currentStepConfig.type,
+      stepTitle: wizard.currentStepConfig.title,
+    });
+  }, [
+    tutorialPhase,
+    tutorialStage,
+    jobId,
+    wizard.currentStep,
+    wizard.currentStepConfig,
+  ]);
 
   // 下書きjobを作成（intro→settingsに進む時）
   const handleCreateDraft = useCallback(async (): Promise<number> => {
@@ -333,6 +384,20 @@ export const WizardContainer = ({
         addressColumn: data.building_type_determination.columns?.address ?? "",
       };
     }
+    if (data.vacant_house?.path) {
+      configured.push("vacant_house");
+      infoMap.vacant_house = {
+        path: data.vacant_house.path,
+        addressColumn: data.vacant_house.columns?.address ?? "",
+      };
+    }
+    if (data.optional_data_source?.path) {
+      configured.push("optional_data_source");
+      infoMap.optional_data_source = {
+        path: data.optional_data_source.path,
+        addressColumn: data.optional_data_source.columns?.address ?? "",
+      };
+    }
 
     setConfiguredDatasets(configured);
     setDatasetInfoMap(infoMap);
@@ -370,9 +435,27 @@ export const WizardContainer = ({
   const handleSubmit = async (): Promise<void> => {
     if (isSubmitting) return;
 
+    const data = form.getValues();
+    // 必須データセットのファイル未選択とカラム未割当は formSchema（zod）が止める。
+    // vacant_house は AIモデル構築時のみ必須。formSchema には載せず、ここで判定する。
+    const isValid = await form.trigger();
+    const vacantHouseMissing =
+      data.settings.purpose === "model_training" &&
+      !data.data.vacant_house.path;
+    if (!isValid || vacantHouseMissing) {
+      // 押下時に確認画面へ検証メッセージを出す（推定・モデル構築と同じ「送信を試みて初めて出る」挙動）。
+      setSubmitAttempted(true);
+      rendererLogger.info(
+        "必須項目が未充足のため名寄せ実行をブロックしました",
+        {
+          componentName: "WizardContainer",
+        },
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const data = form.getValues();
       const result = await window.ipcRenderer.invoke("execE001", {
         parameters: {
           parameterType: "preprocess",
@@ -388,6 +471,14 @@ export const WizardContainer = ({
           componentName: "WizardContainer",
         });
         return;
+      }
+
+      // 再実行（error/complete からの新規実行）は execE001 が新しい job を作る。
+      // その新 id を jobId に反映すると、draft 同期 effect が発火して
+      // tutorial_state.draft_job_id を新 id に追従させる（ガイドが再実行後の処理を
+      // トレースできる）。下書きフローは既に同一 id なので実質 no-op。
+      if (typeof result === "number") {
+        setJobId(result);
       }
 
       afterSubmit();
@@ -406,10 +497,20 @@ export const WizardContainer = ({
         effectiveCurrentStep={wizard.effectiveCurrentStep}
         effectiveSteps={wizard.effectiveSteps}
         progress={wizard.progress}
+        purposeLabel={
+          wizard.currentStepConfig.type === "intro"
+            ? undefined
+            : normalizationPurposeLabel(purpose, true)
+        }
         stepTitle={wizard.currentStepConfig.title}
       />
 
-      <div className={styles.body}>
+      <div
+        className={mergeClasses(
+          styles.body,
+          wizard.currentStepConfig.type === "intro" && styles.bodyFull,
+        )}
+      >
         <main className={styles.main}>
           <WizardStepRenderer
             currentStepIndex={wizard.currentStep}
@@ -418,10 +519,17 @@ export const WizardContainer = ({
             onGoToStep={wizard.goToStep}
             onToggleSkip={wizard.toggleManualSkip}
             stepConfig={wizard.currentStepConfig}
+            submitAttempted={submitAttempted}
           />
         </main>
 
-        <WizardSidePanel stepConfig={wizard.currentStepConfig} />
+        {/* intro はパネルを出さない（揃えるデータは intro 本体に内包）。 */}
+        {wizard.currentStepConfig.type !== "intro" && (
+          <WizardSidePanel
+            purpose={purpose}
+            stepConfig={wizard.currentStepConfig}
+          />
+        )}
       </div>
 
       <WizardFooter

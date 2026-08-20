@@ -3,13 +3,12 @@ import "./maplibre-gl.css";
 import { useEffect } from "react";
 import { type FilterSpecification } from "maplibre-gl";
 import { makeStyles } from "@fluentui/react-components";
-import { type VacancyLevels } from "../../../vacancy-level-checkbox/types";
+import { type ProbabilityRange } from "../../../probability-range-slider/hooks";
 import {
   type MapInitReturn,
   type ViewportLayerEffectReturn,
 } from "../../../../../../hooks/map";
-import { LAYER_SUFFIXES, PREDICTED_PROBABILITY } from "../../const";
-import { type MapWithTableView } from "../../../../../../types";
+import { LAYER_SUFFIXES } from "../../const";
 
 const useStyles = makeStyles({
   map: {
@@ -19,21 +18,28 @@ const useStyles = makeStyles({
 });
 
 type Props = {
-  view: MapWithTableView;
-  vacancyLevels: VacancyLevels;
+  range: ProbabilityRange;
+  /** スライダーの目盛り下限。端ぴったりは無制限扱いの判定に使う */
+  domainMin: number;
+  /** スライダーの目盛り上限（unit/データにより可変）。端ぴったりは無制限扱いの判定に使う */
+  domainMax: number;
+  /** 絞り込む対象のプロパティ名。色分けの基準と同じ量を絞る */
+  filterProperty: string;
   mapInitState: MapInitReturn;
   viewportLayerEffectState?: ViewportLayerEffectReturn;
 };
 
 export function MapContainer({
-  view,
-  vacancyLevels,
+  range,
+  domainMin,
+  domainMax,
+  filterProperty,
   mapInitState: { containerRef, mapInstance },
   viewportLayerEffectState,
 }: Props): JSX.Element {
   const styles = useStyles();
 
-  const { unit } = view;
+  const [min, max] = range;
 
   // ビューポートモードのレイヤーIDのみを使用
   const currentLayerIds = viewportLayerEffectState?.layerIds;
@@ -48,51 +54,22 @@ export function MapContainer({
         `${baseId}${LAYER_SUFFIXES.POLYGONS}`,
       ]);
 
-      const allFalse =
-        !vacancyLevels.low && !vacancyLevels.medium && !vacancyLevels.high;
-      if (allFalse) {
-        for (const layerId of actualLayerIds) {
-          if (!mapInstance.getLayer(layerId)) continue;
-          mapInstance.setLayoutProperty(layerId, "visibility", "none");
-        }
-        return;
+      // 端（min=domainMin / max=domainMax）は無制限扱い。域外（area の 0.11 超、
+      // 変化率の ±50% 超など）も全域では表示する
+      const conditions = [];
+      if (min > domainMin) {
+        conditions.push([">=", ["get", filterProperty], min]);
       }
+      if (max < domainMax) {
+        conditions.push(["<=", ["get", filterProperty], max]);
+      }
+      const mapLibreFilter =
+        conditions.length > 0
+          ? (["all", ...conditions] as FilterSpecification)
+          : null;
 
       for (const layerId of actualLayerIds) {
         if (!mapInstance.getLayer(layerId)) continue;
-        const filters = [];
-        if (vacancyLevels.low) {
-          filters.push([
-            "<",
-            ["get", "predicted_probability"],
-            PREDICTED_PROBABILITY[unit].medium,
-          ]);
-        }
-        if (vacancyLevels.medium) {
-          filters.push([
-            "all",
-            [
-              ">=",
-              ["get", "predicted_probability"],
-              PREDICTED_PROBABILITY[unit].medium,
-            ],
-            [
-              "<",
-              ["get", "predicted_probability"],
-              PREDICTED_PROBABILITY[unit].high,
-            ],
-          ]);
-        }
-        if (vacancyLevels.high) {
-          filters.push([
-            ">=",
-            ["get", "predicted_probability"],
-            PREDICTED_PROBABILITY[unit].high,
-          ]);
-        }
-
-        const mapLibreFilter = ["any", ...filters] as FilterSpecification;
-
         mapInstance.setLayoutProperty(layerId, "visibility", "visible");
         mapInstance.setFilter(layerId, mapLibreFilter);
       }
@@ -100,10 +77,11 @@ export function MapContainer({
     [
       currentLayerIds,
       mapInstance,
-      unit,
-      vacancyLevels.high,
-      vacancyLevels.low,
-      vacancyLevels.medium,
+      min,
+      max,
+      domainMin,
+      domainMax,
+      filterProperty,
     ],
   );
 

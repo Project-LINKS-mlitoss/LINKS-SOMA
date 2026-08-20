@@ -7,13 +7,13 @@
 
 import * as path from "path";
 import { expect, type Page } from "@playwright/test";
+import { type NormalizationPurpose } from "../../features/normalization/hooks/use-form-normalization";
 
 // サンプルデータの表示名マッピング
 export const SAMPLE_DATA_FILES = {
   water_status: "水道開閉栓状況",
   water_usage: "水道使用量",
   resident_registry: "住民基本台帳",
-  census: "国勢調査",
   geocoding: "ジオコーディング済データ",
   building_registry: "登記",
   building_polygon: "建物ポリゴンデータ",
@@ -27,12 +27,13 @@ const SAMPLE_DATA_FILE_NAMES: Record<string, string> = {
   水道開閉栓状況: "水道開閉栓状況.csv",
   水道使用量: "水道使用量.csv",
   住民基本台帳: "住民基本台帳.csv",
-  国勢調査: "国勢調査.zip",
   ジオコーディング済データ: "ジオコーディング済データ.csv",
   登記: "登記.csv",
   建物ポリゴンデータ: "建物ポリゴンデータ（PLATEAU）.gpkg",
   推定対象選定用データ: "推定対象選定用データ.csv",
   空き家調査結果: "空き家調査結果.csv",
+  // 説明変数追加用(ODS)の型不一致(E-201)再現用: 世帯コードを非数値「不明」にした版
+  説明変数追加用_型不正: "説明変数追加用_型不正.csv",
 };
 
 // カラムマッピング設定（フィールドラベルとサンプルデータのカラム名を対応付け）
@@ -73,6 +74,10 @@ const COLUMN_MAPPINGS: Record<string, ColumnMapping> = {
     住所カラム: "住所",
     家屋種別カラム: "種別",
   },
+  // GeoPackage/Shapefile 形式では住所カラムが選択不可になるため家屋種別のみ割り当てる
+  building_type_determination_geopackage: {
+    家屋種別カラム: "usage",
+  },
   vacant_house: {
     住所カラム: "空き家住所",
   },
@@ -86,7 +91,6 @@ const SCHEMA_KEY_MAP: Record<string, string> = {
   水道開閉栓状況: "water_status",
   水道使用量: "water_usage",
   住民基本台帳: "resident_registry",
-  国勢調査: "census",
   ジオコーディング済データ: "geocoding",
   登記: "building_registry",
   推定対象選定用データ: "building_type_determination",
@@ -110,9 +114,11 @@ export type StepAction =
   | { searchPattern: RegExp };
 
 export type WalkWizardOptions = {
+  /** 名寄せの目的（デフォルト: "vacancy_estimation"＝空き家推定） */
+  purpose?: NormalizationPurpose;
   /** 基準日（デフォルト: "2024-01-01"） */
   referenceDate?: string;
-  /** 推定したい市区町村名（デフォルト: "テスト市"） */
+  /** 名寄せ処理対象市区町村名（デフォルト: "テスト市"） */
   municipality?: string;
   /** Step 6: ジオコーディング（デフォルト: "select"） */
   geocoding?: StepAction;
@@ -127,10 +133,28 @@ export type WalkWizardOptions = {
    * buildingTypeDetermination が "select" の場合のみ適用される
    */
   residentialValues?: string[];
+  /**
+   * Step 9: 推定対象選定用データのファイル形式（デフォルト: "csv"）
+   * "geopackage" / "shapefile" は IF001 の建物ポリゴン経路（点を建物の重心
+   * バッファに重ねる空間結合）を通す。CSV は住所結合経路を通る。
+   */
+  buildingTypeDeterminationFileType?: "csv" | "geopackage" | "shapefile";
+  /**
+   * Step 9: 推定対象選定用データのアップロード元（表示名）。
+   * SAMPLE_DATA_FILE_NAMES に登録済みの表示名を渡す。
+   */
+  buildingTypeDeterminationFile?: string;
   /** Step 10: 空き家調査結果（デフォルト: "skip"） */
   vacantHouse?: StepAction;
-  /** Step 11: 説明変数追加用データ（デフォルト: "skip"） */
+  /** Step 11: 建物関連データ（デフォルト: "skip"） */
   optionalDataSource?: StepAction;
+  /**
+   * Step 11: 建物関連データのアップロード元（表示名）。デフォルトは
+   * SAMPLE_DATA_FILES.optional_data_source（住民基本台帳）。型不一致(E-201)の
+   * 再現等で別フィクスチャを ODS に流す場合に指定する。SAMPLE_DATA_FILE_NAMES に
+   * 登録済みの表示名を渡す。
+   */
+  optionalDataSourceFile?: string;
 };
 
 /**
@@ -159,19 +183,20 @@ export async function startNormalizationWizard(page: Page): Promise<void> {
   }
 
   // イントロ画面の表示を確認
-  await expect(page.getByText("名寄せ処理に必要なデータ")).toBeVisible();
+  await expect(page.getByText("用意するデータ", { exact: true })).toBeVisible();
 }
 
 /**
  * 名寄せウィザードをイントロ画面から確認画面まで走査する
  *
- * 前提: ウィザードのイントロ画面（「名寄せ処理に必要なデータ」）が表示されていること
+ * 前提: ウィザードのイントロ画面（「用意するデータ」）が表示されていること
  */
 export async function walkWizard(
   page: Page,
   options: WalkWizardOptions = {},
 ): Promise<void> {
   const {
+    purpose = "vacancy_estimation",
     referenceDate = "2024-01-01",
     municipality = "テスト市",
     geocoding = "select",
@@ -179,71 +204,87 @@ export async function walkWizard(
     buildingPolygon = "skip",
     buildingTypeDetermination = "select",
     residentialValues = [],
+    buildingTypeDeterminationFileType = "csv",
+    buildingTypeDeterminationFile = SAMPLE_DATA_FILES.building_type_determination,
     vacantHouse = "skip",
     optionalDataSource = "skip",
+    optionalDataSourceFile = SAMPLE_DATA_FILES.optional_data_source,
   } = options;
+  const isModelTraining = purpose === "model_training";
 
-  // Step 0: イントロ → 次へ
+  // Step 0: イントロ（目的選択）→ 次へ。AIモデル構築は当該カードをクリック。
+  if (isModelTraining) {
+    await page.getByText("AIモデル構築用の名寄せ処理", { exact: true }).click();
+  }
   await clickNext(page);
 
-  // Step 1: 基本設定（基準日 + 市区町村名）
+  // 基本設定（基準日 + 市区町村名）
   await page.locator('input[type="date"]').fill(referenceDate);
   await page.getByPlaceholder("市区町村名を入力").fill(municipality);
   await clickNext(page);
 
-  // Step 2: 水道栓データ（必須）
+  // 必須: 水道閉開栓状況
   await selectDatasetByName(page, SAMPLE_DATA_FILES.water_status);
   await selectColumns(page, SAMPLE_DATA_FILES.water_status);
   await clickNext(page);
 
-  // Step 3: 水道使用量データ（必須）
+  // 必須: 水道使用量
   await selectDatasetByName(page, SAMPLE_DATA_FILES.water_usage);
   await selectColumns(page, SAMPLE_DATA_FILES.water_usage);
   await clickNext(page);
 
-  // Step 4: 住民基本台帳（必須）
+  // 必須: 住民基本台帳
   await selectDatasetByName(page, SAMPLE_DATA_FILES.resident_registry);
   await selectColumns(page, SAMPLE_DATA_FILES.resident_registry);
   await clickNext(page);
 
-  // Step 5: 国勢調査（必須）- カラム選択なし
-  await selectDatasetByName(page, SAMPLE_DATA_FILES.census);
-  await clickNext(page);
+  // AIモデル構築用は空き家調査結果が必須で、必須ブロック末尾（住民基本台帳の直後）に来る。
+  if (isModelTraining) {
+    await selectDatasetByName(page, SAMPLE_DATA_FILES.vacant_house);
+    await selectColumns(page, "vacant_house");
+    await clickNext(page);
+  }
 
-  // Step 6: ジオコーディング（任意）
+  // 任意: ジオコーディング
   await handleOptionalStep(page, geocoding, {
     dataFile: SAMPLE_DATA_FILES.geocoding,
     schemaKey: SAMPLE_DATA_FILES.geocoding,
   });
 
-  // Step 7: 建物登記データ（任意）
+  // 任意: 建物登記データ
   await handleOptionalStep(page, buildingRegistry, {
     dataFile: SAMPLE_DATA_FILES.building_registry,
     schemaKey: SAMPLE_DATA_FILES.building_registry,
   });
 
-  // Step 8: 建物ポリゴン（任意）- カラム選択なし
+  // 任意: 建物ポリゴン（カラム選択なし）
   await handleOptionalStep(page, buildingPolygon, {
     dataFile: SAMPLE_DATA_FILES.building_polygon,
     skipColumns: true,
   });
 
-  // Step 9: 推定対象選定用データ（任意）
+  // 任意: 処理対象選定用データ
   await handleOptionalStep(page, buildingTypeDetermination, {
-    dataFile: SAMPLE_DATA_FILES.building_type_determination,
-    schemaKey: "building_type_determination",
+    dataFile: buildingTypeDeterminationFile,
+    schemaKey:
+      buildingTypeDeterminationFileType === "csv"
+        ? "building_type_determination"
+        : "building_type_determination_geopackage",
     residentialValues,
+    inputFileType: buildingTypeDeterminationFileType,
   });
 
-  // Step 10: 空き家調査結果（任意）
-  await handleOptionalStep(page, vacantHouse, {
-    dataFile: SAMPLE_DATA_FILES.vacant_house,
-    schemaKey: "vacant_house",
-  });
+  // 空き家推定用は空き家調査結果が任意で、任意ブロックに来る。
+  if (!isModelTraining) {
+    await handleOptionalStep(page, vacantHouse, {
+      dataFile: SAMPLE_DATA_FILES.vacant_house,
+      schemaKey: "vacant_house",
+    });
+  }
 
-  // Step 11: 説明変数追加用データ（任意）
+  // 任意: 建物関連データ
   await handleOptionalStep(page, optionalDataSource, {
-    dataFile: SAMPLE_DATA_FILES.optional_data_source,
+    dataFile: optionalDataSourceFile,
     schemaKey: "optional_data_source",
   });
 }
@@ -259,6 +300,7 @@ async function handleOptionalStep(
     schemaKey?: string;
     skipColumns?: boolean;
     residentialValues?: string[];
+    inputFileType?: "csv" | "geopackage" | "shapefile";
   },
 ): Promise<void> {
   if (action === "skip") {
@@ -268,6 +310,12 @@ async function handleOptionalStep(
     }
     await clickNext(page);
   } else if (action === "select") {
+    // ファイル形式はデータセット選択より先に決める。住所カラムの活性状態が
+    // これに従属するため
+    if (config.inputFileType && config.inputFileType !== "csv") {
+      await page.getByLabel("ファイル形式").selectOption(config.inputFileType);
+      await page.waitForTimeout(300);
+    }
     await selectDatasetByName(page, config.dataFile);
     if (!config.skipColumns && config.schemaKey) {
       await selectColumns(page, config.schemaKey);
@@ -405,12 +453,18 @@ async function uploadDataset(page: Page, displayName: string): Promise<void> {
 export async function selectColumns(
   page: Page,
   displayNameOrSchemaKey: string,
+  mappingOverride?: Record<string, string>,
 ): Promise<void> {
   const schemaKey =
     SCHEMA_KEY_MAP[displayNameOrSchemaKey] ?? displayNameOrSchemaKey;
 
-  const columnMapping = COLUMN_MAPPINGS[schemaKey];
-  if (!columnMapping) return;
+  const baseMapping = COLUMN_MAPPINGS[schemaKey];
+  if (!baseMapping) return;
+  // mappingOverride で一部フィールドの割当を差し替える（例: 同一入力列を2項目へ
+  // 割り当てる E-102 の再現）。キー順は base のまま保たれる。
+  const columnMapping = mappingOverride
+    ? { ...baseMapping, ...mappingOverride }
+    : baseMapping;
 
   await page.waitForTimeout(1000);
 

@@ -88,6 +88,222 @@ class TestWater:
         assert df["water_disconnection_flag"].sum() == 1
 
 
+class TestAggregateUsageCoverage:
+    """aggregate_usage の被覆状況シグナル（E-0020 完全欠損検知の根拠）。
+
+    2番目の戻り値で「使用量ファイルの被覆状況」を返す。IF001 はこれが "deficit" の
+    ときだけ警告 job_task を記録する。集計窓に検針が1件も無い状態が "deficit"。
+    窓の一部しか埋まらない部分欠損は "ok" のまま（既知ギャップ）。
+    """
+
+    def _cfg(self) -> dict:
+        return {
+            "suido_use": {
+                "files": ["2_usage.csv"],
+                "columns": {
+                    "water_supply_number": "水道番号",
+                    "meter_reading_date": "検針日",
+                    "suido_usage": "使用量",
+                },
+            },
+        }
+
+    def _status(self) -> pd.DataFrame:
+        return pd.DataFrame({"water_supply_number": ["W001", "W002"]})
+
+    def test_集計窓に検針が無ければdeficit(self, tmp_path):
+        """検針日が全件 基準日より後 → 完全欠損（deficit）・使用量列は付かない"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        (tmp_path / "2_usage.csv").write_text(
+            "水道番号,検針日,使用量\n"
+            "W001,20240501,10\n"
+            "W002,20240601,20\n",
+            encoding="utf-8",
+        )
+        df, coverage = aggregate_usage(
+            self._cfg(), tmp_path, self._status(),
+            standard_date=pd.Timestamp("2024-01-01"),
+        )
+        assert coverage == "deficit"
+        assert "suido_usage_f1" not in df.columns
+
+    def test_集計窓に検針があればok(self, tmp_path):
+        """検針日が集計窓の中 → 使用量特徴量を付与（ok）。f1..f6 生成のため6期分与える。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        dates = ["20230201", "20230401", "20230601", "20230801", "20231001", "20231201"]
+        lines = ["水道番号,検針日,使用量"]
+        for wn in ["W001", "W002"]:
+            for i, d in enumerate(dates):
+                lines.append(f"{wn},{d},{(i + 1) * 3}")
+        (tmp_path / "2_usage.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        df, coverage = aggregate_usage(
+            self._cfg(), tmp_path, self._status(),
+            standard_date=pd.Timestamp("2024-01-01"),
+        )
+        assert coverage == "ok"
+        assert "suido_usage_f1" in df.columns
+
+    def test_使用量ファイルが無ければno_files(self, tmp_path):
+        """ファイル未指定は欠損ではない（警告しない）→ no_files"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        df, coverage = aggregate_usage(
+            self._cfg(), tmp_path, self._status(),
+            standard_date=pd.Timestamp("2024-01-01"),
+        )
+        assert coverage == "no_files"
+        assert "suido_usage_f1" not in df.columns
+
+
+class TestUsageWindow:
+    """aggregate_usage の集計窓。集計対象は [基準日の1年前の翌日, 基準日] に限る。
+
+    窓の外の検針を繰り上げて使うと、検針が途絶えた家屋にも使用中の値が付く。
+    窓の位置は基準日だけで決まり、検針データの末尾に依存しない。
+    """
+
+    def _cfg(self) -> dict:
+        return {
+            "suido_use": {
+                "files": ["2_usage.csv"],
+                "columns": {
+                    "water_supply_number": "水道番号",
+                    "meter_reading_date": "検針日",
+                    "suido_usage": "使用量",
+                },
+            },
+        }
+
+    def _write(self, tmp_path, rows):
+        lines = ["水道番号,検針日,使用量"]
+        lines += [f"{wn},{d},{v}" for wn, d, v in rows]
+        (tmp_path / "2_usage.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_窓の下限を返す(self):
+        from preprocessing.record_linkage.water import usage_window_start
+        assert usage_window_start(pd.Timestamp("2026-04-01")) == pd.Timestamp("2025-04-02")
+
+    def test_月末基準日でも当月の検針を落とさない(self):
+        """上限は基準日そのもの。当月を除くと月末基準日で直近1ヶ月を捨てることになる。"""
+        from preprocessing.record_linkage.water import usage_window_start
+        assert usage_window_start(pd.Timestamp("2024-03-31")) == pd.Timestamp("2023-04-01")
+
+    def test_窓外の検針しか無ければdeficit(self, tmp_path):
+        """基準日から遡る1年に検針が無い → 完全欠損。使用量列は付かない。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        self._write(tmp_path, [
+            ("W001", d, 60) for d in
+            ["20240504", "20240704", "20240904", "20241104", "20250104", "20250304"]
+        ])
+        df, coverage = aggregate_usage(
+            self._cfg(), tmp_path, pd.DataFrame({"water_supply_number": ["W001"]}),
+            standard_date=pd.Timestamp("2026-04-01"),
+        )
+        assert coverage == "deficit"
+        assert "suido_usage_f1" not in df.columns
+
+    def test_窓外の水道番号には使用量が紐付かない(self, tmp_path):
+        """窓内に検針がある水道番号だけに値が付く。無い側は全項目 NaN。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+        from preprocessing.record_linkage.water import USAGE_F_COLS
+
+        rows = [("W001", d, 60) for d in
+                ["20250502", "20250702", "20250902", "20251102", "20260102", "20260302"]]
+        rows += [("W002", d, 60) for d in
+                 ["20240504", "20240704", "20240904", "20241104", "20250104", "20250304"]]
+        self._write(tmp_path, rows)
+
+        df, coverage = aggregate_usage(
+            self._cfg(), tmp_path, pd.DataFrame({"water_supply_number": ["W001", "W002"]}),
+            standard_date=pd.Timestamp("2026-04-01"),
+        )
+        assert coverage == "ok"
+        inside = df[df["water_supply_number"] == "W001"].iloc[0]
+        outside = df[df["water_supply_number"] == "W002"].iloc[0]
+        assert inside[USAGE_F_COLS].notna().all()
+        assert outside[USAGE_F_COLS].isna().all()
+
+    def test_区間は基準日を終端に2ヶ月ずつ遡る(self):
+        """f6 が基準日直前の2ヶ月、f1 が11・12ヶ月前。区間は隙間なく連続する。"""
+        from preprocessing.record_linkage.water import usage_period_bounds, usage_window_start
+
+        b = usage_period_bounds(pd.Timestamp("2026-04-01"))
+        assert len(b) == 6
+        assert b[5] == (20260202, 20260401)
+        assert b[0] == (20250402, 20250601)
+        assert b[0][0] == int(usage_window_start(pd.Timestamp("2026-04-01")).strftime("%Y%m%d"))
+        for (_, prev_end), (next_start, _) in zip(b, b[1:]):
+            assert pd.Timestamp(str(prev_end)) + pd.Timedelta(days=1) == pd.Timestamp(str(next_start))
+
+    def test_検針は実年月の区間へ入る(self, tmp_path):
+        """詰め順ではなく検針年月日で入れ先が決まる。窓前半に検針が無ければ f1..f3 は空。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        self._write(tmp_path, [("W001", d, v) for d, v in
+                               [("20251110", 30), ("20260110", 25), ("20260310", 20)]])
+        df, _ = aggregate_usage(
+            self._cfg(), tmp_path, pd.DataFrame({"water_supply_number": ["W001"]}),
+            standard_date=pd.Timestamp("2026-04-01"),
+        )
+        r = df.iloc[0]
+        assert pd.isna(r["suido_usage_f1"])
+        assert pd.isna(r["suido_usage_f3"])
+        assert r["suido_usage_f4"] == 30
+        assert r["suido_usage_f5"] == 25
+        assert r["suido_usage_f6"] == 20
+
+    def test_窓より古い検針は直近の区間へ繰り上がらない(self, tmp_path):
+        """窓外の検針があっても、窓内の検針は自分の区間に留まる（繰り上げ防止）。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        old = [("W001", d, 50) for d in
+               ["20240110", "20240310", "20240510", "20240710", "20240910", "20241110"]]
+        recent = [("W001", d, v) for d, v in
+                  [("20251110", 30), ("20260110", 25), ("20260310", 20)]]
+        self._write(tmp_path, old + recent)
+        df, _ = aggregate_usage(
+            self._cfg(), tmp_path, pd.DataFrame({"water_supply_number": ["W001"]}),
+            standard_date=pd.Timestamp("2026-04-01"),
+        )
+        r = df.iloc[0]
+        assert r["suido_usage_f6"] == 20
+        assert r["meter_reading_date_f6"] == 20260310
+        assert r[["suido_usage_f1", "suido_usage_f2", "suido_usage_f3"]].isna().all()
+
+    def test_1区間に複数の検針が入れば合計する(self, tmp_path):
+        """毎月検針では1区間に2件入る。合計して2ヶ月分の使用水量に揃える。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        self._write(tmp_path, [("W001", "20260210", 10), ("W001", "20260310", 10)])
+        df, _ = aggregate_usage(
+            self._cfg(), tmp_path, pd.DataFrame({"water_supply_number": ["W001"]}),
+            standard_date=pd.Timestamp("2026-04-01"),
+        )
+        r = df.iloc[0]
+        assert r["suido_usage_f6"] == 20
+        assert r["meter_reading_date_f6"] == 20260310
+
+    def test_窓の位置は検針データの末尾に依存しない(self, tmp_path):
+        """基準日を動かせば集計結果も動く。動かなければ窓が基準日起点でない。"""
+        from preprocessing.record_linkage.water import aggregate_usage
+
+        self._write(tmp_path, [
+            ("W001", d, 60) for d in
+            ["20240504", "20240704", "20240904", "20241104", "20250104", "20250304"]
+        ])
+        status = pd.DataFrame({"water_supply_number": ["W001"]})
+        _, near = aggregate_usage(
+            self._cfg(), tmp_path, status, standard_date=pd.Timestamp("2025-04-01"))
+        _, far = aggregate_usage(
+            self._cfg(), tmp_path, status, standard_date=pd.Timestamp("2026-04-01"))
+        assert near == "ok"
+        assert far == "deficit"
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # juki module
 # ══════════════════════════════════════════════════════════════════════════════
@@ -521,3 +737,31 @@ class TestLabels:
         result = assign_labels("未知市", {}, "/tmp", df)
         assert (result["is_vacant"] == 0).all()
         assert "vacant_type" in result.columns
+
+    def test_stats_uses_label_side_denominator(self, tmp_path):
+        """stats: 分母=空き家調査結果の一意住所数、分子=水道に一致した数（#1775 結合率表示）
+
+        水道側=大手町1-1・駅前2-3。調査結果=大手町1-1(一致)・山奥9-9(不一致)。
+        → sub_rows=2, matched=1。汎用ローダー経由（都市固有ローダーなし）。
+        """
+        from preprocessing.record_linkage.labels import assign_labels
+
+        (tmp_path / "akiya.csv").write_text(
+            "住所\n"
+            "テスト市大手町1丁目1番\n"
+            "テスト市山奥9丁目9番\n",
+            encoding="utf-8",
+        )
+        df = pd.DataFrame({
+            "normalized_address": ["大手町1-1", "駅前2-3"],
+            "water_supply_number": ["001", "002"],
+        })
+        city_cfg = {
+            "municipality": "テスト市",
+            "labels": {"file": "akiya.csv", "address_col": "住所"},
+        }
+        stats = {}
+        assign_labels("未知市", city_cfg, tmp_path, df, stats=stats)
+
+        assert stats["sub_rows"] == 2
+        assert stats["matched"] == 1

@@ -53,7 +53,9 @@ export const CHECK_TARGETS: { key: JoinCheckTarget; label: string }[] = [
   { key: "resident_registry", label: "住民基本台帳" },
   { key: "building_registry", label: "登記情報" },
   { key: "geocoding", label: "ジオコーディング" },
-  { key: "building_type_determination", label: "推定対象選定用データ" },
+  { key: "building_type_determination", label: "処理対象選定用データ" },
+  { key: "vacant_house", label: "空き家調査結果" },
+  { key: "optional_data_source", label: "建物関連データ" },
 ];
 
 /** 未結合レコードの表示上限 */

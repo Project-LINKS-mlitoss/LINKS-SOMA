@@ -22,7 +22,7 @@ import {
   SearchRegular,
   DeleteRegular,
 } from "@fluentui/react-icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Tab } from "../../../../shared/components/ui/tab";
 import { rendererLogger } from "../../../../shared/utils/renderer-logger";
@@ -30,6 +30,8 @@ import { useFetchNormalizedDatasets } from "../../../dataset/hooks/use-fetch-nor
 import { type ReturnUseDialogState } from "../../../../shared/hooks/use-dialog-state";
 import { type SelectNormalizedDataSet } from "../../../../db/schema";
 import { saveDataSetFile } from "../../../../shared/utils/save-data-set-file";
+import { detectNonUtf8Files } from "../../../../shared/utils/detect-non-utf8-files";
+import { EncodingWarning } from "../../../../shared/components/encoding-warning";
 import { formatByteValue } from "../../../../shared/utils/format-byte-value";
 import { Button } from "../../../../shared/components/ui/button";
 import { DialogSurface } from "../../../../shared/components/ui/dialog-surface";
@@ -207,6 +209,7 @@ export const DialogSelectAnalysisDataset = ({
     SelectNormalizedDataSet[]
   >([]);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [nonUtf8Files, setNonUtf8Files] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const { isOpen, setIsOpen } = dialogState;
@@ -317,6 +320,18 @@ export const DialogSelectAnalysisDataset = ({
     onDrop: handleFileDrop,
     multiple: true,
   });
+
+  // PV-01 文字コード: アップロード済みファイルの非UTF-8 を非ブロッキングで注意。
+  // 追加・削除を一律に扱うため uploadedFiles から都度再計算する（選択は妨げない）。
+  useEffect(() => {
+    let cancelled = false;
+    void detectNonUtf8Files(uploadedFiles).then((flagged) => {
+      if (!cancelled) setNonUtf8Files(flagged);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [uploadedFiles]);
 
   const isDisabledButton =
     (selectedTab === "select" && selectedDataSets.length === 0) ||
@@ -523,6 +538,7 @@ export const DialogSelectAnalysisDataset = ({
                     )}
                   </div>
                 )}
+                <EncodingWarning fileNames={nonUtf8Files} />
               </div>
             )}
           </DialogContent>

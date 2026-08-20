@@ -60,6 +60,8 @@ type Props = {
   register: UseFormRegister<{
     parameters: Parameter[];
   }>;
+  /** 優先順位の表示と並べ替え操作。行の先頭に配置する */
+  priority: JSX.Element;
 };
 
 export const FieldNumber = ({
@@ -69,6 +71,7 @@ export const FieldNumber = ({
   index,
   unit,
   register,
+  priority,
 }: Props): JSX.Element => {
   const styles = useStyles();
   if (
@@ -83,6 +86,7 @@ export const FieldNumber = ({
 
   return (
     <Field className={styles.groupField}>
+      {priority}
       <Input
         className={styles.inputLabelValue}
         defaultValue={field.value.label}

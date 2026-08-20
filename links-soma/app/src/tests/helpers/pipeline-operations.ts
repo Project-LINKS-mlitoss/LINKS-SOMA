@@ -5,13 +5,24 @@
  * ダイアログからのデータ選択、カラム設定など、複数テストで共通する操作を共通化する。
  */
 
+import * as path from "path";
 import { expect, type Page } from "@playwright/test";
+import { lang } from "../../shared/config/lang";
 import {
   snapshotJobIds,
   captureNewJobId,
   getDraftJobIdFromUrl,
   type JobType,
 } from "./job-operations";
+
+// フィクスチャディレクトリのパス
+const FIXTURES_DIR = path.join(__dirname, "../fixtures");
+
+/** 地域集計用データカードの見出し。UI と同じ文言を参照し、改名時に検証が空振りしないようにする */
+const AREA_FORM_HEADING = lang.pages["evaluation/create"].subtitle3.label;
+
+/** ジオメトリ源の判定フェッチが解決するまでの待機。非表示の確定はこの後に行う */
+const AREA_FORM_SETTLE_MS = 2000;
 
 // ============================================================
 // データ選択ダイアログ操作
@@ -50,10 +61,9 @@ export async function selectFromDialog(
   if (options.searchText) {
     targetRow = dialogRows.filter({ hasText: options.searchText });
     if (options.notFoundMessage) {
-      expect(
-        await targetRow.count(),
-        options.notFoundMessage,
-      ).toBeGreaterThan(0);
+      expect(await targetRow.count(), options.notFoundMessage).toBeGreaterThan(
+        0,
+      );
     }
   } else {
     targetRow = dialogRows.first();
@@ -111,23 +121,29 @@ export async function navigateAndStartAction(
 /**
  * 空き家推定フォームを入力する
  *
- * ① 分析対象データを選択
+ * ① 推定対象データを選択
  * ② モデルファイルを選択
  * ③ 地域集計用データを選択 + カラム設定（KEY_CODE / S_NAME）
  *
+ * skipAreaGrouping=true のときは ③ を行わず、地域集計フォームが非表示であることを検証する。
+ * ジオコーディングを使っていない名寄せデータでは地域集計フォームが出ない（issue #1924）。
+ *
  * @param datasetName - 名寄せ処理済みデータの名前。省略時は先頭行を選択
  * @param modelName - モデルファイルの名前。省略時は先頭行を選択
+ * @param skipAreaGrouping - 地域集計フォームが非表示である想定。③をスキップし非表示を検証する
  */
 export async function fillEstimationForm(
   page: Page,
   options: {
-    /** 分析対象データの名前。省略時は先頭行を選択 */
+    /** 推定対象データの名前。省略時は先頭行を選択 */
     datasetName?: string | RegExp;
     /** モデルファイルの名前。省略時は先頭行を選択（注意: 汎用モデルが先頭に来る場合がある。自前モデルを使う場合は明示指定を推奨） */
     modelName?: string | RegExp;
+    /** 地域集計フォームが非表示である想定。③をスキップし非表示を検証する */
+    skipAreaGrouping?: boolean;
   } = {},
 ): Promise<void> {
-  // ① 分析対象データを選択
+  // ① 推定対象データを選択
   await selectFromDialog(page, {
     triggerButton: page.getByRole("button", { name: "選択" }).first(),
     searchText: options.datasetName,
@@ -147,18 +163,115 @@ export async function fillEstimationForm(
       : undefined,
   });
 
-  // ③ 地域集計用データを選択（国勢調査シェープファイル）
-  await selectFromDialog(page, {
-    triggerButton: page.getByRole("button", { name: "選択" }).first(),
-    searchText: /国勢調査/,
-    confirmButton: "データを決定",
-    notFoundMessage: "国勢調査シェープファイルが選択ダイアログに表示されること",
-  });
+  if (options.skipAreaGrouping) {
+    // 地域集計フォームはジオメトリ源の判定フェッチが解決するまで出ない。解決前に
+    // toBeHidden を取ると「まだ出ていないだけ」を非表示と誤認するため、待機してから確定させる。
+    await page.waitForTimeout(AREA_FORM_SETTLE_MS);
+    await expect(
+      page.getByText(AREA_FORM_HEADING),
+      "ジオメトリ源を持たない名寄せデータでは地域集計フォームが非表示であること（#1924）",
+    ).toBeHidden();
+    return;
+  }
+
+  // ③ 地域集計用データ（国勢調査）を選択またはアップロード
+  await selectAreaDataset(page);
   // 地域集計用データ選択後は少し長めに待機（カラムドロップダウンの描画待ち）
   await page.waitForTimeout(500);
 
   // カラム設定
   await configureAreaColumns(page);
+}
+
+/**
+ * 推定フォームに複数の名寄せ済みデータを選択して入力する（複数年推定用）。
+ *
+ * 推定対象データの選択ダイアログはチェックボックス複数選択に対応しており、
+ * 選択した全データセットを1回の推定にまとめる（IF003 が同一 data_set_result に append）。
+ * これにより異なる reference_date を持つ複数年の推定結果データを生成できる。
+ *
+ * @param datasetNames - まとめて選択する名寄せ済みデータの名前一覧（表示名で行を特定）
+ * @param modelName - モデルファイルの名前。省略時は先頭行を選択
+ */
+export async function fillEstimationFormMultiDataset(
+  page: Page,
+  options: {
+    datasetNames: (string | RegExp)[];
+    modelName?: string | RegExp;
+  },
+): Promise<void> {
+  // ① 推定対象データを複数選択（各名前の行をクリックしてチェックを入れる）
+  await page.getByRole("button", { name: "選択" }).first().click();
+  await page.waitForSelector('[role="dialog"]');
+  const dialog = page.locator('[role="dialog"]');
+  for (const name of options.datasetNames) {
+    const row = dialog.locator("table tbody tr").filter({ hasText: name });
+    expect(
+      await row.count(),
+      `推定対象データ「${String(name)}」が選択ダイアログに表示されること`,
+    ).toBeGreaterThan(0);
+    await row.first().click();
+  }
+  await dialog.getByRole("button", { name: "データを決定" }).click();
+  await page.waitForSelector('[role="dialog"]', { state: "hidden" });
+  await page.waitForTimeout(500);
+
+  // ② モデルファイルを選択（①で選択済みのため残りの「選択」ボタンの先頭を使用）
+  await selectFromDialog(page, {
+    triggerButton: page.getByRole("button", { name: "選択" }).first(),
+    searchText: options.modelName,
+    confirmButton: "データを決定",
+    notFoundMessage: options.modelName
+      ? `モデル「${String(options.modelName)}」が選択ダイアログに表示されること`
+      : undefined,
+  });
+
+  // ③ 地域集計用データ（国勢調査）を選択またはアップロード
+  await selectAreaDataset(page);
+  await page.waitForTimeout(500);
+
+  // カラム設定
+  await configureAreaColumns(page);
+}
+
+/**
+ * 地域集計用データ（国勢調査）を推定フォームで選択する
+ *
+ * 名寄せウィザードから国勢調査入力を撤去した（#1776）ため、推定画面側で供給する。
+ * 既存の raw データセットに国勢調査があれば選択し、なければ「新規アップロード」
+ * タブから 国勢調査.zip をアップロードする（DialogSelectAreaDataset の振る舞い）。
+ *
+ * 確定ボタンは姉妹ダイアログ（推定対象データ）と統一して「データを決定」。
+ * トリガー「選択」とは別ラベルだが、アップロードタブのファイル入力をダイアログ内に
+ * スコープして取り違えを避ける。
+ */
+export async function selectAreaDataset(page: Page): Promise<void> {
+  // 地域集計フォームは選択データのジオメトリ源判定後に表示される（#1924）。
+  // 判定フェッチ完了までフォームが出ないため、見出しの表示を待ってから操作する。
+  await expect(page.getByText(AREA_FORM_HEADING)).toBeVisible();
+  // フォーム上に残る「選択」トリガーは地域集計欄のみ（推定対象・モデルは選択済み）
+  await page.getByRole("button", { name: "選択" }).first().click();
+  await page.waitForSelector('[role="dialog"]');
+  const dialog = page.locator('[role="dialog"]');
+
+  const censusRow = dialog
+    .locator("table tbody tr")
+    .filter({ hasText: /国勢調査/ });
+
+  if ((await censusRow.count()) > 0) {
+    await censusRow.first().click();
+  } else {
+    await dialog.getByRole("tab", { name: "新規アップロード" }).click();
+    await page.waitForTimeout(300);
+    const fileInput = dialog.locator('input[type="file"]');
+    await fileInput.setInputFiles(path.join(FIXTURES_DIR, "国勢調査.zip"));
+    await page.waitForTimeout(500);
+  }
+
+  // 確定（アップロード時は保存+IPC完了まで dialog が閉じない）
+  await dialog.getByRole("button", { name: "データを決定" }).click();
+  await page.waitForSelector('[role="dialog"]', { state: "hidden" });
+  await page.waitForTimeout(1000);
 }
 
 /**
@@ -245,7 +358,7 @@ export async function fillModelBuildingForm(
 export async function startPipelineAndNavigateToStatus(
   page: Page,
   options: {
-    /** 開始ボタンのテキスト（例: "分析開始", "モデル構築開始"） */
+    /** 開始ボタンのテキスト（例: "推定開始", "モデル構築開始"） */
     startButton: string;
     /** 開始後に表示される確認メッセージ */
     confirmMessage: string;

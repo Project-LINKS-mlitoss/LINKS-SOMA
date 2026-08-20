@@ -37,6 +37,7 @@ import {
   generateJobName,
   verifyNormalizationJoiningRates,
   verifyEstimationResultCount,
+  fetchNormalizedDatasetRecords,
 } from "../../helpers/job-operations";
 import {
   navigateAndStartAction,
@@ -77,15 +78,13 @@ test.describe("登記データあり名寄せ・推定処理", () => {
 
     await expect(page.getByRole("button", { name: "開始する" })).toBeVisible();
 
-    const { newJobId: preprocessJobId } = await startPipelineAndNavigateToStatus(
-      page,
-      {
+    const { newJobId: preprocessJobId } =
+      await startPipelineAndNavigateToStatus(page, {
         startButton: "開始する",
         confirmMessage: "データ名寄せ処理を開始しました",
         statusHashIncludes: "normalization",
         draftUrlPathSegment: "normalization",
-      },
-    );
+      });
     if (preprocessJobId === undefined) {
       throw new Error("preprocess jobId が確定していません");
     }
@@ -112,6 +111,56 @@ test.describe("登記データあり名寄せ・推定処理", () => {
     await saveJobResult(page, { title: savedDatasetName });
   });
 
+  test("登記の経過年数3指標（案E)が名寄せ出力に正しく出ること", async () => {
+    test.setTimeout(120000);
+
+    const { headers, records } = await fetchNormalizedDatasetRecords(
+      page,
+      savedDatasetName,
+    );
+
+    // 列の存在（案E: issue #1777）
+    for (const col of ["築年数", "相続後経過年数", "増築後経過年数"]) {
+      expect(headers, `名寄せ出力に「${col}」列があること`).toContain(col);
+    }
+
+    // 登記マッチ行では築年数が数値で入る（fixtures/登記.csv は新築イベント多数）
+    const withAge = records.filter((r) => r["築年数"] !== "");
+    expect(
+      withAge.length,
+      "築年数が入る行が1件以上（登記結合が値まで反映されていること）",
+    ).toBeGreaterThan(0);
+
+    // 増築を持つのは fixtures 上 1 住所（一ツ橋二丁目5-3: 新築1962/相続1990/増築2010）。
+    // 事由が新しいほど経過年数は小さい → 築年数 > 相続後 > 増築後 > 0 が成り立つはず。
+    const withExtension = records.filter((r) => r["増築後経過年数"] !== "");
+    expect(
+      withExtension.length,
+      "増築後経過年数が入る行が存在すること（増築イベントの検出がE2Eで機能）",
+    ).toBeGreaterThan(0);
+
+    for (const r of withExtension) {
+      const age = Number(r["築年数"]);
+      const inheritance = Number(r["相続後経過年数"]);
+      const extension = Number(r["増築後経過年数"]);
+      expect(
+        Number.isFinite(age) &&
+          Number.isFinite(inheritance) &&
+          Number.isFinite(extension),
+        `3指標が数値であること: ${JSON.stringify({ age, inheritance, extension })}`,
+      ).toBe(true);
+      expect(
+        age,
+        "築年数 > 相続後経過年数（最古1962 > 相続1990）",
+      ).toBeGreaterThan(inheritance);
+      expect(
+        inheritance,
+        "相続後経過年数 > 増築後経過年数（相続1990 > 増築2010）",
+      ).toBeGreaterThan(extension);
+      expect(extension, "増築後経過年数 > 0").toBeGreaterThan(0);
+    }
+  });
+
   test("登記データあり名寄せ結果で空き家推定が完了すること", async () => {
     test.setTimeout(3600000);
 
@@ -127,7 +176,7 @@ test.describe("登記データあり名寄せ・推定処理", () => {
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

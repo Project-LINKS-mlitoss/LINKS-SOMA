@@ -154,6 +154,25 @@ class TestConvertAddressPrefecture:
         result = CleanData.convert_address("横浜市中区", municipality="豊田市")
         assert result.startswith("横浜市")
 
+    def test_remove_city_with_fullwidth_space_separator(self):
+        """都道府県名と市名が全角スペース区切りでも市名が除去される
+
+        都道府県・市区町村の除去は先頭一致のため、空白がスペース削除より後に
+        残っていると `^豊田市` が当たらず市名が残る。
+        """
+        result = CleanData.convert_address("愛知県　豊田市　大手町", municipality="豊田市")
+        assert result == "大手町"
+
+    def test_remove_city_with_halfwidth_space_separator(self):
+        """都道府県名と市名が半角スペース区切りでも市名が除去される"""
+        result = CleanData.convert_address("愛知県 豊田市 大手町", municipality="豊田市")
+        assert result == "大手町"
+
+    def test_remove_prefecture_with_leading_space(self):
+        """先頭に空白があっても都道府県名が除去される"""
+        result = CleanData.convert_address("　愛知県豊田市大手町", municipality="豊田市")
+        assert result == "大手町"
+
 
 class TestConvertAddressBanchi:
     """番地・号の正規化"""

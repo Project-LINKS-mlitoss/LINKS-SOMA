@@ -1,6 +1,5 @@
 import { type result_views } from "../../db/schema";
 import { type FormNormalizationType } from "../../features/normalization/hooks/use-form-normalization";
-import { translateColumnToJapanese } from "../column-translation-utils";
 import { lang } from "./lang";
 
 type ResultViewsStyle = (typeof result_views.style.enumValues)[number];
@@ -29,7 +28,7 @@ type NormalizationParameterLabelKey =
     FormNormalizationType["data"]["building_registry"]["columns"] &
     FormNormalizationType["data"]["building_type_determination"]["columns"] &
     FormNormalizationType["data"]["geocoding"]["columns"] &
-    Omit<FormNormalizationType["settings"], "advanced">);
+    Omit<FormNormalizationType["settings"], "advanced" | "purpose">);
 
 type NormalizationParameterLabel = Record<
   NormalizationParameterLabelKey,
@@ -50,9 +49,8 @@ const NORMALIZATION_PARAMETER_LABEL: NormalizationParameterLabel = {
   water_usage: params.water_usage.shortLabel,
   water_recorded_date: params.water_recorded_date.shortLabel,
   structure_name: params.structure_name.shortLabel,
-  // reference_date は動的生成を維持
-  reference_date: `推定したい日付(${translateColumnToJapanese("reference_date", "building")})`,
-  municipality: "推定したい市区町村名",
+  reference_date: "基準日",
+  municipality: "名寄せ処理対象市区町村名",
   registration_reason: params.registration_reason.shortLabel,
   building_type: params.building_type.shortLabel,
   latitude: params.latitude.shortLabel,

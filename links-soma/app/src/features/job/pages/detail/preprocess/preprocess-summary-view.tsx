@@ -13,6 +13,10 @@ import {
   typographyStyles,
 } from "@fluentui/react-components";
 import { type PreprocessSummaryTaskResult } from "../../../../../shared/types/job-task-result";
+import { lang } from "../../../../../shared/config/lang";
+import { formatBreakdownPercent } from "../../../util/preprocess-summary-rows";
+
+const s = lang.components.preprocessSummary;
 
 const useStyles = makeStyles({
   container: {
@@ -73,13 +77,8 @@ type Props = {
 export function PreprocessSummaryView({ data }: Props): JSX.Element {
   const styles = useStyles();
 
-  const formatPercentage = (
-    percentage: number,
-    count: number,
-    total: number,
-  ): string => {
-    return `${percentage.toFixed(1)}% (${count.toLocaleString()}件/${total.toLocaleString()}件中)`;
-  };
+  // 構成比の書式は検証情報DLと共有する。画面とファイルで数値の形が食い違わないため
+  const formatPercentage = formatBreakdownPercent;
 
   const renderStatusText = (hasData: boolean): JSX.Element => {
     return (
@@ -89,7 +88,7 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
           hasData ? styles.hasData : styles.noData,
         )}
       >
-        {hasData ? "あり" : "なし"}
+        {hasData ? s.hasData : s.noData}
       </Text>
     );
   };
@@ -98,11 +97,9 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
     <div className={styles.container}>
       {/* 総件数 */}
       <Card className={styles.card}>
-        <Text className={styles.sectionTitle}>
-          名寄せ処理済データ（推定対象）の総件数
-        </Text>
+        <Text className={styles.sectionTitle}>{s.totalCountSection}</Text>
         <div>
-          <Text className={styles.totalCountLabel}>件数</Text>
+          <Text className={styles.totalCountLabel}>{s.totalCountLabel}</Text>
           <br />
           <Text className={styles.totalCount}>
             {data.estimation_target_total_count.toLocaleString()}件
@@ -111,27 +108,29 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
       </Card>
 
       <Text className={styles.sectionTitleWithMargin}>
-        名寄せ処理済データの内訳
+        {s.breakdownHeading}
       </Text>
 
       {/* 名寄せ処理済データの内訳 */}
       <Card className={styles.card}>
         {/* レコードの組み合わせ別 */}
-        <Text className={styles.sectionTitle}>レコードの組み合わせ別</Text>
+        <Text className={styles.sectionTitle}>
+          {s.recordCombinationSection}
+        </Text>
         <Table className={styles.table}>
           <TableHeader className={styles.tableHeader}>
             <TableRow>
               <TableHeaderCell className={styles.headerCell}>
-                水道開閉栓状況
+                {s.waterSupplyColumn}
               </TableHeaderCell>
               <TableHeaderCell className={styles.headerCell}>
-                住民基本台帳
+                {s.jukiRegistryColumn}
               </TableHeaderCell>
               <TableHeaderCell className={styles.headerCell}>
-                登記情報
+                {s.toukiRegistryColumn}
               </TableHeaderCell>
               <TableHeaderCell className={styles.headerCell}>
-                構成比
+                {s.percentageColumn}
               </TableHeaderCell>
             </TableRow>
           </TableHeader>
@@ -162,22 +161,22 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
 
       {/* 家屋種別 */}
       <Card className={styles.card}>
-        <Text className={styles.sectionTitle}>家屋種別</Text>
+        <Text className={styles.sectionTitle}>{s.buildingTypeSection}</Text>
         <Table className={styles.table}>
           <TableHeader className={styles.tableHeader}>
             <TableRow>
               <TableHeaderCell className={styles.headerCell}>
-                種別
+                {s.typeColumn}
               </TableHeaderCell>
               <TableHeaderCell className={styles.headerCell}>
-                構成比
+                {s.percentageColumn}
               </TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow>
               <TableCell className={styles.tableCell}>
-                ユーザーが指定した種別
+                {s.buildingTypeUserSpecified}
               </TableCell>
               <TableCell className={styles.tableCell}>
                 {formatPercentage(
@@ -188,7 +187,9 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
               </TableCell>
             </TableRow>
             <TableRow>
-              <TableCell className={styles.tableCell}>種別不明</TableCell>
+              <TableCell className={styles.tableCell}>
+                {s.buildingTypeUnknown}
+              </TableCell>
               <TableCell className={styles.tableCell}>
                 {formatPercentage(
                   data.building_type_breakdown?.unknown?.percentage ?? 0,
@@ -203,22 +204,22 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
 
       {/* 地図表示別 */}
       <Card className={styles.card}>
-        <Text className={styles.sectionTitle}>地図表示別</Text>
+        <Text className={styles.sectionTitle}>{s.mapDisplaySection}</Text>
         <Table className={styles.table}>
           <TableHeader className={styles.tableHeader}>
             <TableRow>
               <TableHeaderCell className={styles.headerCell}>
-                種別
+                {s.typeColumn}
               </TableHeaderCell>
               <TableHeaderCell className={styles.headerCell}>
-                構成比
+                {s.percentageColumn}
               </TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
             <TableRow>
               <TableCell className={styles.tableCell}>
-                建物ポリゴン表示
+                {s.mapDisplayWithPolygon}
               </TableCell>
               <TableCell className={styles.tableCell}>
                 {formatPercentage(
@@ -230,7 +231,9 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
               </TableCell>
             </TableRow>
             <TableRow>
-              <TableCell className={styles.tableCell}>ポイント表示</TableCell>
+              <TableCell className={styles.tableCell}>
+                {s.mapDisplayWithoutPolygon}
+              </TableCell>
               <TableCell className={styles.tableCell}>
                 {formatPercentage(
                   data.building_polygon_breakdown?.without_polygon
@@ -242,7 +245,7 @@ export function PreprocessSummaryView({ data }: Props): JSX.Element {
             </TableRow>
             <TableRow>
               <TableCell className={styles.tableCell}>
-                表示対象外（座標なし）
+                {s.mapDisplayExcluded}
               </TableCell>
               <TableCell className={styles.tableCell}>
                 {formatPercentage(

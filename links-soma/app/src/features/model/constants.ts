@@ -1,8 +1,8 @@
 /**
- * モデル構築（IF002）の説明変数に関する定数
+ * モデル構築（IF002）に渡す設定の定数
  *
- * FEATURE_COLS 40個をデフォルト選択する。
- * ユーザーはUIで追加・削除が可能。
+ * 説明変数は FEATURE_COLS 40個をデフォルト選択し、ユーザーはUIで追加・削除が可能。
+ * ハイパーパラメータはUIを持たず固定値。
  */
 
 /** フォーム初期値としてデフォルト選択されるカラム（FEATURE_COLS 40個準拠） */
@@ -55,3 +55,61 @@ export const DEFAULT_EXPLANATORY_COLUMNS = [
 
 /** UI上で選択解除不可のカラムはなし（ユーザーが自由に選択可能） */
 export const LOCKED_EXPLANATORY_COLUMNS: readonly string[] = [];
+
+/**
+ * モデル構築（IF002）へ固定で渡すハイパーパラメータ（`settings.advanced`）
+ *
+ * ハイパーパラメータチューニングは行わない方針のため、画面にこの値を変更するUIはなく、
+ * すべてのモデルがこの1組で構築される（issue #1999）。
+ *
+ * `settings.advanced` を空で渡してもIF002は動くが、その場合はPython側の既定値が効く。
+ * `threshold` だけはPython側の既定（0.65）と値が異なり、省略すると構築されるモデルが変わる。
+ * 省略せずここから渡すことでモデルの挙動を固定する。
+ *
+ * 各値がPython側でどう扱われるか:
+ * - `threshold`: E021では再現率目標（recall_target）として使われ、モデルに保存する推奨閾値を
+ *   決める（`ml/async_tasks/IF002.py`）。この14項目で唯一モデルの出力に効く
+ * - `test_size` / `lambda_l1` / `lambda_l2` / `num_leaves` / `feature_fraction` /
+ *   `bagging_fraction` / `bagging_freq` / `min_data_in_leaf`: E021が読むが、ここの値は
+ *   E021側の既定と同じため上書きが起きない（`ml/src/E002_Classification/E021.py`）
+ * - `n_splits` / `undersample` / `undersample_ratio` / `hyperparameter_flag` / `n_trials`:
+ *   E021は引数で受け取りログに出すだけで、学習には使わない
+ */
+export const FIXED_MODEL_ADVANCED = {
+  test_size: 0.3,
+  n_splits: 3,
+  undersample: false,
+  undersample_ratio: 3.0,
+  threshold: 0.3,
+  hyperparameter_flag: false,
+  n_trials: 100,
+  lambda_l1: 0,
+  lambda_l2: 0,
+  num_leaves: 31,
+  feature_fraction: 1.0,
+  bagging_fraction: 1.0,
+  bagging_freq: 0,
+  min_data_in_leaf: 20,
+};
+
+/**
+ * 説明変数の候補から除外するカラム（名寄せ済みデータに含まれるが説明変数ではない）
+ *
+ * 空き家調査結果を結合したときだけ生成される5列で、いずれも教師ラベル
+ * `is_vacant` の値を含意する。説明変数に選べるとモデルが答えを見て学習する。
+ *
+ * - `is_vacant`: 教師ラベルそのもの（`ml/src/E002_Classification/E021.py` の `LABEL_COL`）
+ * - `vacant_type` / `vacant_source` / `vacant_year`: 調査結果とマッチした行にのみ値が入り、
+ *   非マッチは空文字（`ml/src/preprocessing/record_linkage/labels.py`）。値あり ⇒ is_vacant=1
+ * - `address_precision_flag`: is_vacant=1 の行だけ判定し他は一律 0（同 labels.py）。1 ⇒ is_vacant=1
+ *
+ * 分析画面では5列とも表示する。表示は「分かりにくい列を隠す」問題、
+ * ここは「ラベルが漏れる」問題で、判断の軸が別（issue #1794）。
+ */
+export const HIDDEN_EXPLANATORY_COLUMNS: readonly string[] = [
+  "is_vacant",
+  "vacant_type",
+  "vacant_source",
+  "vacant_year",
+  "address_precision_flag",
+];

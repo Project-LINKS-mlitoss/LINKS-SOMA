@@ -1,5 +1,5 @@
 /**
- * 説明変数追加用データ（optional_data_source）受け入れテスト
+ * 建物関連データ（optional_data_source）受け入れテスト
  *
  * #1659 で追加された optional_data_source パイプライン対応の受け入れテスト。
  * IF001 → IF002 → IF003 の全パイプラインを通し、_ods カラムが
@@ -205,9 +205,9 @@ test.describe("optional_data_source 受け入れテスト: IF001 → IF002 → I
 
     expect(finalStatus).toBe("complete");
 
-    // 結合率検証: 住基(juki) + ジオコーディング(geo) = 2件想定（buildingRegistryはskip）
+    // 結合率検証: 住基(juki) + ジオコーディング(geo) + ODS + 空き家調査結果(vacant_house) = 4件想定（buildingRegistryはskip、#1775）
     await verifyNormalizationJoiningRates(page, {
-      expectedJoinSteps: 2,
+      expectedJoinSteps: 4,
       label: "IF001（ODS）",
     });
   });
@@ -355,7 +355,7 @@ test.describe("optional_data_source 受け入れテスト: IF001 → IF002 → I
     const { newJobId: resultJobId } = await startPipelineAndNavigateToStatus(
       page,
       {
-        startButton: "分析開始",
+        startButton: "推定開始",
         confirmMessage: "分析を開始しました",
         statusHashIncludes: "evaluation",
         createHashExcludes: "create",

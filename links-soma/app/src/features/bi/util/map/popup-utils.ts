@@ -71,7 +71,9 @@ const formatValue = (key: string, value: unknown): string | null => {
   if (
     key.includes("ratio") ||
     key.includes("percentage") ||
-    key === "predicted_probability"
+    key === "predicted_probability" ||
+    key === "predicted_probability_change_rate_from_oldest" ||
+    key === "predicted_probability_change_rate_from_previous"
   ) {
     if (typeof value === "number") {
       return `${Math.floor(value * 1000) / 10}%`;
@@ -85,6 +87,16 @@ const formatValue = (key: string, value: unknown): string | null => {
 
   // R7フラグの場合
   if (key === "buildingtype_determination_not_possible_flag") {
+    return value === 1 ? "該当" : "非該当";
+  }
+
+  // 空き家調査結果ラベル（実測）
+  if (key === "is_vacant") {
+    return value === 1 ? "空き家" : "非空き家";
+  }
+
+  // 空き家調査結果の住所が番地・号レベルを欠くか
+  if (key === "address_precision_flag") {
     return value === 1 ? "該当" : "非該当";
   }
 

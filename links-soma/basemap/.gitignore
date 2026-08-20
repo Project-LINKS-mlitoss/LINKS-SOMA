@@ -1,0 +1,9 @@
+# cloneしたprotomaps/basemapsリポジトリ
+basemaps/
+
+# Planetilerがダウンロードするデータ（OSM, Natural Earth等）
+data/
+
+# ビルド成果物
+output/
+*.pmtiles

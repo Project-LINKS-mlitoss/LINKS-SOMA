@@ -42,6 +42,34 @@ def create_or_update_job(job_id: int, status: str, job_type: str = "", process_i
         CONNECTION.rollback()
         return None
 
+def fetch_raw_dataset_file_names() -> Dict[str, str]:
+    """raw_data_sets の {file_path: file_name} を返す（エラー文面に登録名を添えるため）。
+
+    未接続・テーブル未存在・クエリ失敗のいずれでも空 dict を返し、エラー記録本体を
+    決して妨げない（登録名はあくまで補助情報）。
+    """
+    if CURSOR is None:
+        return {}
+    try:
+        rows = CURSOR.execute("SELECT file_path, file_name FROM raw_data_sets").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {row[0]: row[1] for row in rows if row[0]}
+
+def fetch_normalized_dataset_file_names() -> Dict[str, str]:
+    """normalized_data_sets の {file_path: file_name} を返す（推定エラーに対象データ名を添えるため）。
+
+    IF003（推定）が読むのは生CSVでなく名寄せ済みデータセット。その表示名を file_path で引く。
+    未接続・テーブル未存在・失敗時は空 dict でフォールバックする。
+    """
+    if CURSOR is None:
+        return {}
+    try:
+        rows = CURSOR.execute("SELECT file_path, file_name FROM normalized_data_sets").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {row[0]: row[1] for row in rows if row[0]}
+
 def create_or_update_summarization_job_task(job_id: int, progress_percent: str, preprocess_type: str|None, result, id: int = None, is_finish: bool = False) -> tuple:
     try:
         finished_at = None
@@ -65,6 +93,23 @@ def create_or_update_summarization_job_task(job_id: int, progress_percent: str, 
     
 def create_or_update_job_task(job_id: int, progress_percent: str, preprocess_type: str|None, error_code: str, error_msg: str, result, id: int = None, is_finish: bool = False) -> int:
     try:
+        # FR006: エラーコードがあれば責任分界・次アクションを result に相乗りさせ、UIで表示できるようにする。
+        if error_code:
+            # フラット/パッケージ両構成で解決する（呼び出し元の sys.path 構成に依存しない）。
+            # これに失敗するとエラーの job_task が書けず UI が原因を失うため、確実に解決させる。
+            try:
+                from error_registry import build_error_result
+                from error_file_context import annotate_registered_files
+            except ModuleNotFoundError:
+                from async_tasks.error_registry import build_error_result
+                from async_tasks.error_file_context import annotate_registered_files
+            result = build_error_result(result, error_code)
+            # 本文に埋まった内部ファイル名(UUID)を登録名へ一括変換（全エラー横断・記録の単一口）
+            if error_msg:
+                error_msg = annotate_registered_files(
+                    error_msg,
+                    {**fetch_raw_dataset_file_names(), **fetch_normalized_dataset_file_names()},
+                )
         finished_at = None
         if is_finish:
             finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -142,7 +187,101 @@ def create_data_set_detail_buildings_or_area(input_data, table_name="data_set_de
     except Exception as e:
         CONNECTION.rollback()
         raise Exception(e)
-        
+
+
+def update_buildings_area_group(rows, data_set_result_id):
+    """
+    建物テーブルの area_group / key_code を正規化住所で更新する。
+
+    地域集計(E032)と同一の空間結合結果から (area_group, key_code, 正規化住所) を
+    受け取ることで、建物単位の地域フィルターを地域集計の定義と一致させる。
+    国勢調査が名寄せに渡らなくなった現構成では、建物の area_group は
+    推定時の地域ポリゴン(area_grouping)からのみ付与できる。
+
+    rows: iterable of (area_group, key_code, normalized_address)
+    return: 更新対象に渡した行数
+    """
+    conn = CONNECTION
+    params = [
+        (area_group, key_code, data_set_result_id, address)
+        for (area_group, key_code, address) in rows
+        if address not in (None, "")
+    ]
+    if not params:
+        return 0
+    try:
+        conn.executemany(
+            "UPDATE data_set_detail_buildings "
+            "SET area_group = ?, key_code = ? "
+            "WHERE data_set_result_id = ? AND normalized_address = ?",
+            params,
+        )
+        conn.commit()
+        return len(params)
+    except Exception as e:
+        conn.rollback()
+        raise Exception(e)
+
+
+def update_predicted_probability_change_rates(data_set_result_id):
+    """建物単位の空き家推定確率の年度間変化率(2列)を算出して UPDATE する。
+
+    複数年度の名寄せデータで推定した結果(reference_date が複数)でのみ意味を持つ
+    後処理。全年度の建物書き込み完了後に1度だけ呼ぶ想定。
+
+    算出ロジックは probability_change_rate.compute_probability_change_rates に委譲。
+    変化率が両方とも算出対象外(NaN)の行は UPDATE せず、無駄な書き込みを避ける。
+
+    return: UPDATE した行数
+    """
+    from probability_change_rate import (
+        COLUMN_FROM_OLDEST,
+        COLUMN_FROM_PREVIOUS,
+        compute_probability_change_rates,
+    )
+
+    conn = CONNECTION
+    df = pd.read_sql(
+        "SELECT id, normalized_address, reference_date, predicted_probability "
+        "FROM data_set_detail_buildings WHERE data_set_result_id = ?",
+        conn,
+        params=(data_set_result_id,),
+    )
+    if df.empty:
+        return 0
+
+    result = compute_probability_change_rates(df)
+
+    params = []
+    for row_id, from_oldest, from_previous in zip(
+        result["id"].tolist(),
+        result[COLUMN_FROM_OLDEST].tolist(),
+        result[COLUMN_FROM_PREVIOUS].tolist(),
+    ):
+        oldest_value = None if pd.isna(from_oldest) else float(from_oldest)
+        previous_value = None if pd.isna(from_previous) else float(from_previous)
+        if oldest_value is None and previous_value is None:
+            continue
+        params.append((oldest_value, previous_value, int(row_id)))
+
+    if not params:
+        return 0
+
+    try:
+        conn.executemany(
+            "UPDATE data_set_detail_buildings "
+            "SET predicted_probability_change_rate_from_oldest = ?, "
+            "predicted_probability_change_rate_from_previous = ? "
+            "WHERE id = ?",
+            params,
+        )
+        conn.commit()
+        return len(params)
+    except Exception as e:
+        conn.rollback()
+        raise Exception(e)
+
+
 def create_data_set_results(title: str = "", job_id: int | None = None):
     try:
         current_date = datetime.now().strftime('%m%d')
@@ -158,6 +297,10 @@ def create_data_set_results(title: str = "", job_id: int | None = None):
 
         sql = 'INSERT INTO data_set_results (title, job_id) VALUES (?, ?)'
         CURSOR.execute(sql, (title, job_id))
+        # 推定結果を保存したら、紐づくジョブを保存済み(is_named=1)にする。
+        # 結果は自動保存されるのに保存ステータスが「未」のままになる不具合の修正。
+        if job_id is not None:
+            CURSOR.execute('UPDATE jobs SET is_named = 1 WHERE id = ?', (job_id,))
         CONNECTION.commit()
         id = CURSOR.lastrowid
         return id
@@ -264,6 +407,10 @@ def get_data_set_detail_buildings_or_area(view: dict):
                     columns_name += ", lon_geocoding"
                 if "residence_id" not in columns_name.split(","):
                     columns_name += ", residence_id"
+                # 建物関連データはビューの表示項目に出ない（画面側で個別カラムへ展開する）。
+                # 列指定に現れないため明示的に足さないと出力から欠ける。
+                if "optional_data_source" not in columns_name.split(","):
+                    columns_name += ", optional_data_source"
                 if "predicted_label" in columns_name.split(","):
                     columns_append = [
                         f"predicted_label_{threshold_percent:02d}"
@@ -363,33 +510,33 @@ def get_rotating_logger(
     log_dir_normalized = os.path.normpath(os.path.abspath(log_dir))
     log_path = os.path.join(log_dir_normalized, file_name)
 
-    # Use normalized path in logger name to avoid duplicates
-    logger = logging.getLogger(f"{logger_name}_{log_path}")
+    # logger 名は logger_name のみ（ログ各行 [name] への絶対パス混入を防ぐ）。
+    logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
     logger.propagate = False  # Prevent duplicate logs
 
-    # Check if handler already exists (compare normalized paths)
-    has_handler = False
-    for h in logger.handlers:
-        if isinstance(h, TimedRotatingFileHandler):
-            h_path = os.path.normpath(os.path.abspath(h.baseFilename))
-            if h_path == log_path:
-                has_handler = True
-                break
+    # 1 logger 名 = 常に 1 ファイル。同名ロガーを別ディレクトリで再取得した場合（将来の常駐
+    # ワーカー等）、旧 FileHandler を張り替え、複数ファイルへの二重書き込みを防ぐ。
+    for h in list(logger.handlers):
+        if not isinstance(h, TimedRotatingFileHandler):
+            continue
+        if os.path.normpath(os.path.abspath(h.baseFilename)) == log_path:
+            return logger  # 同一パスのハンドラ設定済み
+        logger.removeHandler(h)
+        h.close()
 
-    if not has_handler:
-        handler = TimedRotatingFileHandler(
-            log_path,
-            when=when,
-            interval=interval,
-            backupCount=backup_count,
-            encoding="utf-8",
-        )
-        formatter = logging.Formatter(
-            fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+    handler = TimedRotatingFileHandler(
+        log_path,
+        when=when,
+        interval=interval,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
     return logger

@@ -330,6 +330,19 @@ class TestHouseholdShrinkageRate:
         result = add_juki_features(df, self.REF)
         assert result["household_shrinkage_rate"].iloc[0] == pytest.approx(1.0)
 
+    def test_unknown_household_size_is_nan(self):
+        """世帯人数が不明 → NaN（1人と仮定して0.0にしない）
+
+        1人と仮定すると、転出者がいた住所でも「誰も出ていない安定した世帯」を
+        示す値になる。
+        """
+        df = pd.DataFrame({
+            "num_outmigrants_relocations_juki_residence": [np.nan],
+            "household_size_juki_residence": [np.nan],
+        })
+        result = add_juki_features(df, self.REF)
+        assert np.isnan(result["household_shrinkage_rate"].iloc[0])
+
     def test_fallback_nan(self):
         """必要カラムなし → NaN"""
         df = pd.DataFrame({"other": [1]})

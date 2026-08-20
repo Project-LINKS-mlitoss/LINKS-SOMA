@@ -133,6 +133,8 @@ FILE_NAME_JP = {
     "touki": "建物情報",
     "geocoding": "ジオコーディング済みデータ",
     "building_type_determination": "建物種別判定用データ",
+    "optional_data_source": "建物関連データ",
+    "vacant_house": "空き家調査結果",
 }
 
 ERROR_CODE = None
@@ -420,6 +422,11 @@ class CleanData:
                 "鹿児島県",
                 "沖縄県",
             ]
+            # 全角・半角スペースを削除
+            # 都道府県名・市区町村名の削除より前に行う。両者は先頭一致で除去するため、
+            # 「愛知県　豊田市　〇〇」のように間に空白があると一致せず市名が residual として残る
+            address = re.sub(r"[\s　]+", "", address)
+
             # 都道府県名を削除
             pattern = "^(" + "|".join(map(re.escape, prefectures)) + ")"
             address = re.sub(pattern, "", address)
@@ -432,9 +439,6 @@ class CleanData:
                 )
                 pattern2 = "^" + re.escape(normalized_municipality)
                 address = re.sub(pattern2, "", address)
-
-            # 全角・半角スペースを削除
-            address = re.sub(r"[\s　]+", "", address)
 
             # ハイフンを半角ハイフン（U+002D）に変換
             address = re.sub(r"[－—―−]", "-", address)
@@ -1543,6 +1547,16 @@ def normalize_address(
         if input_files.get("building_type_determination"):
             output_paths["building_type_determination"] = f"{output_directory}/building_type_determination_cleaned.csv"
 
+        if input_files.get("optional_data_source"):
+            output_paths["optional_data_source"] = (
+                f"{output_directory}/optional_data_source_cleaned.csv"
+            )
+
+        if input_files.get("vacant_house"):
+            output_paths["vacant_house"] = (
+                f"{output_directory}/vacant_house_cleaned.csv"
+            )
+
         if sqlite_enabled and job_id:
             create_or_update_job(job_id, "10")
 
@@ -1686,6 +1700,18 @@ def set_input_output_columns(columns):
             ),
             "normalized_address": "normalized_address",
         },
+        "optional_data_source": {
+            "optional_data_source_address": (
+                columns.get("optional_data_source", {}).get("optional_data_source_address")
+            ),
+            "normalized_address": "normalized_address",
+        },
+        "vacant_house": {
+            "vacant_house_address": (
+                columns.get("vacant_house", {}).get("vacant_house_address")
+            ),
+            "normalized_address": "normalized_address",
+        },
     }
     global INPUT_COLUMNS, OUTPUT_COLUMNS
     INPUT_COLUMNS = input_columns
@@ -1711,6 +1737,14 @@ def set_input_output_columns(columns):
         },
         "geocoding": {
             "geocoding_address": "geocoding_address",
+            "normalized_address": "normalized_address",
+        },
+        "optional_data_source": {
+            "optional_data_source_address": "optional_data_source_address",
+            "normalized_address": "normalized_address",
+        },
+        "vacant_house": {
+            "vacant_house_address": "vacant_house_address",
             "normalized_address": "normalized_address",
         },
     }

@@ -1,7 +1,11 @@
 import { forwardRef } from "react";
 import { mergeClasses } from "@fluentui/react-components";
 import { type SelectDataSetDetailArea } from "../../../../../../../db/schema";
-import { PREDICTED_PROBABILITY, POPUP_BUTTON_TEXT } from "../const";
+import { POPUP_BUTTON_TEXT } from "../const";
+import {
+  getGradientStops,
+  getProbabilityColor,
+} from "../../../../../util/map/layer-styles";
 import { PopupToggleButton } from "./popup-toggle-button";
 import { PopupSlideContainer } from "./popup-slide-container";
 import { AllColumnsView } from "./all-columns-view";
@@ -11,22 +15,9 @@ export type AreaProperties = SelectDataSetDetailArea;
 
 interface Props {
   properties: AreaProperties;
+  /** スライダー目盛り上限。色境界をデータ分布に合わせ、地図ポリゴンと色を一致させる */
+  domainMax: number;
 }
-
-/**
- * 空き家推定確率に基づく色スタイルを計算（SSR対応のため純粋関数）
- */
-const getPredictedProbabilityColorStyle = (
-  predictedProbability: number | null,
-): string | undefined => {
-  if (predictedProbability === null) return undefined;
-  if (predictedProbability >= PREDICTED_PROBABILITY.area.high) {
-    return "high";
-  } else if (predictedProbability >= PREDICTED_PROBABILITY.area.medium) {
-    return "medium";
-  }
-  return "low";
-};
 
 /**
  * 空き家推定確率をフォーマット（SSR対応のため純粋関数）
@@ -40,12 +31,14 @@ const formatPredictedProbability = (
 };
 
 export const AreaPopup = forwardRef<HTMLDivElement, Props>(
-  ({ properties }, ref) => {
+  ({ properties, domainMax }, ref) => {
     const { predicted_probability } = properties;
 
     // SSR対応: フックを使用せず純粋関数で計算
-    const predictedProbabilityColorStyle = getPredictedProbabilityColorStyle(
+    // 地図ポリゴンと同じ連続グラデーション色に統一する（色の整合性）
+    const headerColor = getProbabilityColor(
       predicted_probability,
+      getGradientStops(domainMax),
     );
     const formattedPredictedProbability = formatPredictedProbability(
       predicted_probability,
@@ -86,14 +79,13 @@ export const AreaPopup = forwardRef<HTMLDivElement, Props>(
     return (
       <div ref={ref} className={styles.container} tabIndex={-1}>
         <div
-          className={mergeClasses(
-            styles.header,
-            predictedProbabilityColorStyle
-              ? styles[predictedProbabilityColorStyle]
-              : undefined,
-          )}
+          className={styles.header}
+          style={{ color: headerColor, backgroundColor: `${headerColor}1f` }}
         >
-          <span className={styles.circleIcon} />
+          <span
+            className={styles.circleIcon}
+            style={{ backgroundColor: headerColor }}
+          />
           <div>
             <span className={styles.predictedProbability}>
               {formattedPredictedProbability}

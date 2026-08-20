@@ -109,6 +109,9 @@ def add_juki_features(df: pd.DataFrame, reference_date: pd.Timestamp) -> pd.Data
         df["has_death_event"] = reason_df.apply(
             lambda col: _contains_keyword(col, "死亡")
         ).any(axis=1).astype(int)
+        # 照合語は num_cancellations_juki_residence（record_linkage/juki.py の「消除」）
+        # より狭い。「消除」に広げると死亡消除・転出消除も立ち、本列はモデルの説明変数
+        # （app/src/features/model/constants.ts）のためプリセットモデル再学習が要る。
         df["has_cancellation_event"] = reason_df.apply(
             lambda col: _contains_keyword(col, "職権消除")
         ).any(axis=1).astype(int)
@@ -165,11 +168,16 @@ def add_juki_features(df: pd.DataFrame, reference_date: pd.Timestamp) -> pd.Data
 
     # ── 6. Household shrinkage rate ───────────────────────────────────────────
     if "num_outmigrants_relocations_juki_residence" in df.columns:
+        # 世帯人数が不明な行は縮小率を出せない。1人と仮定すると 0.0 になり、
+        # 転出者がいた住所でも「誰も出ていない安定した世帯」を示す値になる。
         outmig = df["num_outmigrants_relocations_juki_residence"].fillna(0)
-        hsize  = df.get(
-            "household_size_juki_residence", pd.Series(1, index=df.index)
-        ).fillna(1).clip(lower=1)
-        df["household_shrinkage_rate"] = outmig / hsize
+        hsize  = pd.to_numeric(
+            df.get("household_size_juki_residence", pd.Series(np.nan, index=df.index)),
+            errors="coerce",
+        )
+        df["household_shrinkage_rate"] = (
+            outmig / hsize.clip(lower=1)
+        ).where(hsize.notna())
     else:
         df["household_shrinkage_rate"] = np.nan
     added.append("household_shrinkage_rate")

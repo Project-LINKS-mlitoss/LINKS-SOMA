@@ -17,6 +17,7 @@ import { dataKeyMapping } from "../../config/dataset-configs";
 import { type lang } from "../../../../shared/config/lang";
 import { type WizardStepConfig } from "./wizard-steps";
 import { QuickSelectSection } from "./quick-select-section";
+import { ApplyPreviousMappingSection } from "./apply-previous-mapping-section";
 
 const useStyles = makeStyles({
   container: {
@@ -127,7 +128,10 @@ export const WizardStepDataset = ({
         </div>
       ) : (
         <>
-          {/* クイック選択セクション（推定対象選定用データ向け） */}
+          {/* 前回の名寄せで使ったカラム設定を当該データセットへ適用 */}
+          <ApplyPreviousMappingSection form={form} schemaKey={schemaKey} />
+
+          {/* クイック選択セクション（処理対象選定用データ向け） */}
           {showQuickSelect && <QuickSelectSection form={form} />}
 
           {/* NOTE: Controllerを使用して動的フィールドパスの型推論問題を回避 */}

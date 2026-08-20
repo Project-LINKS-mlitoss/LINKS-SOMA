@@ -18,7 +18,7 @@
     "e2e:help": "playwright test --list"
   },
   "dependencies": {
-    "@digital-go-jp/abr-geocoder": "2.2.1"
+    "@digital-go-jp/abr-geocoder": "2.3.1"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",

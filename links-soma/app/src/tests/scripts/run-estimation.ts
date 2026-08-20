@@ -54,12 +54,12 @@ test("空き家推定を実行して推定結果データを作成する", async
   // eslint-disable-next-line no-console -- 操作スクリプトの進捗表示
   console.log("✅ 地域集計用データ設定完了（KEY_CODE / S_NAME）");
 
-  // === Step 3: 分析開始 ===
+  // === Step 3: 推定開始 ===
   // eslint-disable-next-line no-console -- 操作スクリプトの進捗表示
   console.log("🚀 分析を開始します");
 
   await startPipelineAndNavigateToStatus(page, {
-    startButton: "分析開始",
+    startButton: "推定開始",
     confirmMessage: "分析を開始しました",
     statusHashIncludes: "evaluation",
     createHashExcludes: "create",

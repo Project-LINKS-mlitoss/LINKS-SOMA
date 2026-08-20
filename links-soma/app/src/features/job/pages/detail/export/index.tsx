@@ -166,7 +166,7 @@ export function ExportDetail(): JSX.Element {
             </div>
           )}
         </div>
-        {/* 実行設定 */}
+        {/* 実行情報 */}
         {job && job[0] && <JobParametersSection job={job[0]} />}
       </div>
       <div className={styles.restartButtonWrapper}>

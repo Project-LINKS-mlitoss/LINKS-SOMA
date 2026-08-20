@@ -1,5 +1,5 @@
 import { type Map as MapLibreMap } from "maplibre-gl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { renderToString } from "react-dom/server";
 import {
   AreaPopup,
@@ -13,7 +13,10 @@ import { OVERLAP_NAVIGATION } from "../../components/views/map/map-container/con
 import type { FeatureData } from "../../types";
 import type { MapWithTableView } from "../../types/models/view";
 import { getLngLatFromGeometry } from "../../util/map/get-lng-lat-from-geometry";
-import { type GetFeatureById } from "./use-feature-fetcher";
+import {
+  type GetFeatureById,
+  type GetFeatureByReferenceDate,
+} from "./use-feature-fetcher";
 import {
   type NavigateOverlap,
   type OverlapInfo,
@@ -59,11 +62,23 @@ export const usePopupEffectWithFeature = ({
   mapInstance,
   view: { unit, parameters },
   getFeatureById,
+  getFeatureByReferenceDate,
+  selectedDate,
+  oldestReferenceDate,
+  domainMax,
 }: {
   mapInstance: MapLibreMap | null;
   view: MapWithTableView;
   /** IDでフィーチャーを取得する関数（遅延読み込み用） */
   getFeatureById: GetFeatureById;
+  /** 別の推定基準日で同一対象を取得する関数 */
+  getFeatureByReferenceDate: GetFeatureByReferenceDate;
+  /** 現在選択中の推定基準日。切り替え時にポップアップを引き直す */
+  selectedDate: string | undefined;
+  /** 対象結果の最古推定基準日。最古年度は変化行を出さないための判定に使う */
+  oldestReferenceDate: string | undefined;
+  /** スライダー目盛り上限。area ポップアップ色を地図と一致させるのに使う */
+  domainMax: number;
 }): UsePopupEffectWithFeatureReturn => {
   const [selectedFeature, setSelectedFeatureState] =
     useState<FeatureData | null>(null);
@@ -113,6 +128,27 @@ export const usePopupEffectWithFeature = ({
     setOverlapInfo(null);
   }, [unit, parameters, setOverlapInfo]);
 
+  // 推定基準日を切り替えたら、開いているポップアップを新しい推定日の同一対象へ
+  // 引き直す。対象が新しい推定日に存在しなければ非表示（null）にする。
+  // selectedFeature 自体は依存に入れず、推定日の変更時のみ発火させる（クリック直後の
+  // 再取得ループを避ける）。最新の選択対象は ref から読む。
+  const selectedFeatureRef = useRef(selectedFeature);
+  selectedFeatureRef.current = selectedFeature;
+  useEffect(() => {
+    const current = selectedFeatureRef.current;
+    if (!current) return;
+    let cancelled = false;
+    void getFeatureByReferenceDate(current, selectedDate).then((next) => {
+      if (cancelled) return;
+      setOverlapInfo(null);
+      setSelectedFeatureState(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 推定日変更時のみ引き直す
+  }, [selectedDate]);
+
   // ポップアップの表示制御
   useEffect(() => {
     if (!mapInstance || !selectedFeature) return;
@@ -121,11 +157,19 @@ export const usePopupEffectWithFeature = ({
     const popupContent = renderToString(
       unit === "building" ? (
         <BuildingPopup
+          isOldestReferenceDate={
+            !!oldestReferenceDate &&
+            (selectedFeature.properties as BuildingProperties)
+              .reference_date === oldestReferenceDate
+          }
           overlapInfo={overlapInfo ?? undefined}
           properties={selectedFeature.properties as BuildingProperties}
         />
       ) : (
-        <AreaPopup properties={selectedFeature.properties as AreaProperties} />
+        <AreaPopup
+          domainMax={domainMax}
+          properties={selectedFeature.properties as AreaProperties}
+        />
       ),
     );
 
@@ -172,6 +216,8 @@ export const usePopupEffectWithFeature = ({
     mapInstance,
     selectedFeature,
     unit,
+    domainMax,
+    oldestReferenceDate,
     overlapInfo,
     showPopup,
     clearPopup,

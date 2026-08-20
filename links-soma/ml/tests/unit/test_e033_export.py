@@ -12,8 +12,10 @@ import fiona
 import geopandas as gpd
 import pandas as pd
 import pytest
+from shapely.geometry import Point
 
 from E003_Summarization.E033 import export_data, rename_columns
+from constants import COLUMNS_EXPORT_BUILDING_IF004
 
 
 # ============================================================
@@ -356,3 +358,209 @@ class TestRenameColumns:
         assert result.geometry.notnull().all()
         # カラム名が日本語に翻訳されている
         assert "建物ID" in result.columns
+
+
+# ============================================================
+# 出力対象カラムの網羅 テスト
+# ============================================================
+
+
+# 画面に出ていて出力にも必要な列と、その日本語名。
+# 正本は app/src/shared/column-translations.json（building）。
+EXPECTED_EXPORT_COLUMNS = {
+    "is_vacant": "空き家",
+    "vacant_type": "空き家区分",
+    "vacant_source": "空き家調査元",
+    "vacant_year": "空き家調査年度",
+    "address_precision_flag": "調査住所精度不足フラグ",
+    "predicted_probability_change_rate_from_oldest": "空き家推定確率の変化率（最古年度比）",
+    "predicted_probability_change_rate_from_previous": "空き家推定確率の変化率（前年度比）",
+    "storeys_above_ground": "地上階数",
+    "num_cancellations": "職権消除数",
+    "flag_zero_usage_over4consecutivemonths": "連続4か月使用量0フラグ",
+}
+
+
+@pytest.fixture
+def gdf_building_full_columns():
+    """EXPECTED_EXPORT_COLUMNS の全列を持つ building GeoDataFrame"""
+    df = pd.DataFrame({
+        "building_id": ["BLD001", "BLD002"],
+        "normalized_address": ["東京都千代田区1-1", "東京都新宿区2-2"],
+        "predicted_label": [1, 0],
+        "predicted_probability": [0.85, 0.12],
+        "is_vacant": [1, 0],
+        "vacant_type": ["空き家", ""],
+        "vacant_source": ["調査A", ""],
+        "vacant_year": ["令和7年", ""],
+        "address_precision_flag": [1, 0],
+        "predicted_probability_change_rate_from_oldest": [0.1, -0.2],
+        "predicted_probability_change_rate_from_previous": [0.3, -0.4],
+        "storeys_above_ground": [2, 3],
+        "num_cancellations": [0, 1],
+        "flag_zero_usage_over4consecutivemonths": [1, 0],
+    })
+    df["bldg_geometry"] = [Point(139.76, 35.68), Point(139.78, 35.70)]
+    return gpd.GeoDataFrame(df, geometry="bldg_geometry", crs="EPSG:4326")
+
+
+class TestExportColumnCoverage:
+    """COLUMNS_EXPORT_BUILDING_IF004 が出力対象カラムを取りこぼさないことを検証
+
+    rename_columns() は辞書に載る列だけを残すホワイトリスト。DBとUIに列を足しても
+    辞書へ登録しなければデータ出力から静かに消える（issue #1794）。
+    """
+
+    def test_csv_contains_expected_columns(
+        self, tmp_path, gdf_building_full_columns
+    ):
+        """CSV出力に画面で選べる列が日本語名で含まれる"""
+        out = tmp_path / "out.csv"
+        export_data(gdf_building_full_columns, str(out), "csv", "building")
+
+        header = pd.read_csv(str(out), nrows=0).columns.tolist()
+        missing = [jp for jp in EXPECTED_EXPORT_COLUMNS.values() if jp not in header]
+        assert not missing, f"CSV出力に含まれないカラム: {missing}"
+
+    def test_geojson_contains_expected_columns(
+        self, tmp_path, gdf_building_full_columns
+    ):
+        """GeoJSON出力のpropertiesに画面で選べる列が含まれる"""
+        out = tmp_path / "out.geojson"
+        export_data(gdf_building_full_columns, str(out), "geojson", "building")
+
+        with open(out, encoding="utf-8") as f:
+            data = json.load(f)
+        props = data["features"][0]["properties"]
+        missing = [jp for jp in EXPECTED_EXPORT_COLUMNS.values() if jp not in props]
+        assert not missing, f"GeoJSON出力に含まれないカラム: {missing}"
+
+    def test_dictionary_registers_expected_columns(self):
+        """辞書のDBカラム名と日本語名がUIの表示名と一致する"""
+        for en, jp in EXPECTED_EXPORT_COLUMNS.items():
+            assert COLUMNS_EXPORT_BUILDING_IF004.get(en) == jp
+
+
+# ============================================================
+# 建物関連データの展開 テスト
+# ============================================================
+
+
+def _gdf_with_ods(ods_values):
+    """optional_data_source を持つ building GeoDataFrame を組み立てる"""
+    df = pd.DataFrame({
+        "building_id": [f"BLD{i:03d}" for i in range(1, len(ods_values) + 1)],
+        "normalized_address": [f"東京都千代田区{i}-1" for i in range(1, len(ods_values) + 1)],
+        "predicted_label": [1] * len(ods_values),
+        "predicted_probability": [0.5] * len(ods_values),
+        "optional_data_source": ods_values,
+    })
+    df["bldg_geometry"] = [Point(139.76 + i / 100, 35.68) for i in range(len(ods_values))]
+    return gpd.GeoDataFrame(df, geometry="bldg_geometry", crs="EPSG:4326")
+
+
+ODS_JSON_A = '[{"name": "課税標準額", "value": "5000000"}, {"name": "評価額", "value": "35"}]'
+ODS_JSON_B = '[{"name": "課税標準額", "value": "1200000"}, {"name": "評価額", "value": null}]'
+
+
+class TestOptionalDataSourceExport:
+    """建物関連データ（optional_data_source）の個別カラム展開を検証
+
+    DBは1列のJSONで保持し、分析画面は個別カラムへ展開して表示する。
+    データ出力も同じ表示名で展開する（issue #1794）。
+    """
+
+    def test_csv_expands_entries_into_columns(self, tmp_path):
+        """CSV出力でエントリが「[追加] 名前」のカラムに展開される"""
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([ODS_JSON_A, ODS_JSON_B]), str(out), "csv", "building")
+
+        df = pd.read_csv(str(out), dtype=str)
+        assert "[追加] 課税標準額" in df.columns
+        assert "[追加] 評価額" in df.columns
+        assert df["[追加] 課税標準額"].tolist() == ["5000000", "1200000"]
+        # value が null のエントリは欠損として出す
+        assert pd.isna(df["[追加] 評価額"].iloc[1])
+
+    def test_csv_places_expanded_columns_last(self, tmp_path):
+        """展開したカラムは既存カラムの後ろに並ぶ"""
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([ODS_JSON_A]), str(out), "csv", "building")
+
+        header = pd.read_csv(str(out), nrows=0).columns.tolist()
+        assert header[-2:] == ["[追加] 課税標準額", "[追加] 評価額"]
+
+    def test_csv_row_without_entries_is_blank(self, tmp_path):
+        """建物関連データを結合していない行は空欄になる"""
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([ODS_JSON_A, None]), str(out), "csv", "building")
+
+        df = pd.read_csv(str(out), dtype=str)
+        assert df["[追加] 課税標準額"].iloc[0] == "5000000"
+        assert pd.isna(df["[追加] 課税標準額"].iloc[1])
+
+    def test_csv_all_null_adds_no_columns(self, tmp_path):
+        """全行 NULL のときは展開カラムを作らず、JSONの生カラムも出さない"""
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([None, None]), str(out), "csv", "building")
+
+        header = pd.read_csv(str(out), nrows=0).columns.tolist()
+        assert not [col for col in header if col.startswith("[追加] ")]
+        assert "optional_data_source" not in header
+
+    def test_geojson_expands_entries_into_properties(self, tmp_path):
+        """GeoJSON出力のpropertiesにも展開したカラムが出る"""
+        out = tmp_path / "out.geojson"
+        export_data(_gdf_with_ods([ODS_JSON_A]), str(out), "geojson", "building")
+
+        with open(out, encoding="utf-8") as f:
+            data = json.load(f)
+        props = data["features"][0]["properties"]
+        assert props["[追加] 課税標準額"] == "5000000"
+        assert "optional_data_source" not in props
+
+    def test_geopackage_expands_entries_into_columns(self, tmp_path):
+        """GeoPackage出力でも展開したカラムが書き込まれる"""
+        out = tmp_path / "out.gpkg"
+        export_data(_gdf_with_ods([ODS_JSON_A]), str(out), "geopackage", "building")
+
+        gdf = gpd.read_file(str(out))
+        assert "[追加] 課税標準額" in gdf.columns
+        assert gdf["[追加] 課税標準額"].iloc[0] == "5000000"
+
+    def test_columns_are_union_across_rows(self, tmp_path):
+        """年度で列の集合が違っても、後の年度にしかない列を落とさない
+
+        複数年度の推定は1つの data_set_result_id に年度ごとの行を書き込む(IF003)。
+        先頭行だけで列を決めると、後の年度の建物関連データが全行から消える。
+        """
+        first_year = '[{"name": "課税標準額", "value": "5000000"}]'
+        second_year = '[{"name": "課税標準額", "value": "1200000"}, {"name": "評価額", "value": "800000"}]'
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([first_year, second_year]), str(out), "csv", "building")
+
+        df = pd.read_csv(str(out), dtype=str)
+        assert "[追加] 評価額" in df.columns
+        assert pd.isna(df["[追加] 評価額"].iloc[0])
+        assert df["[追加] 評価額"].iloc[1] == "800000"
+
+    def test_geopackage_null_geometry_keeps_expanded_columns(self, tmp_path):
+        """全行ジオメトリなしでも attributes レイヤーに展開カラムが残る"""
+        gdf = _gdf_with_ods([ODS_JSON_A])
+        gdf["bldg_geometry"] = [None]
+        out = tmp_path / "out.gpkg"
+        export_data(gdf, str(out), "geopackage", "building")
+
+        conn = sqlite3.connect(str(out))
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(attributes)")]
+        conn.close()
+        assert "[追加] 課税標準額" in columns
+
+    def test_broken_json_is_treated_as_empty(self, tmp_path):
+        """壊れたJSONの行は空として扱い、出力を止めない"""
+        out = tmp_path / "out.csv"
+        export_data(_gdf_with_ods([ODS_JSON_A, "{壊れた"]), str(out), "csv", "building")
+
+        df = pd.read_csv(str(out), dtype=str)
+        assert len(df) == 2
+        assert pd.isna(df["[追加] 課税標準額"].iloc[1])

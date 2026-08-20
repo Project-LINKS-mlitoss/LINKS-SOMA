@@ -30,6 +30,11 @@ import { DialogImportDataset } from "./dialog-import-dataset";
 import { DialogBuildingTypeSelection } from "./dialog-building-type-selection";
 
 const useStyles = makeStyles({
+  // カード自身の幅を基準にレスポンシブ切替するためのコンテナ。
+  // ビューポート幅(@media)ではなく実際のカード幅で列数を決めるため。
+  card: {
+    containerType: "inline-size",
+  },
   fileSelectorContainer: {
     display: "flex",
     flexDirection: "column",
@@ -37,6 +42,8 @@ const useStyles = makeStyles({
     justifyContent: "center",
     width: "200px",
     height: "160px",
+    // flex item は既定で縮むため、固定幅を保つには flexShrink:0 が必要
+    flexShrink: 0,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
     border: `1px dashed ${tokens.colorNeutralStroke2}`,
     borderRadius: "5px",
@@ -53,15 +60,23 @@ const useStyles = makeStyles({
   dropdownContainer: {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gridAutoRows: "60px",
+    // 行高は最小60pxで、ラベル折り返し等で内容が増えたら伸びる（固定高だと重なる）
+    gridAutoRows: "minmax(60px, auto)",
     gap: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
-    // NOTE: ブレークポイント1200pxは実際の使用環境で調整が必要な可能性あり
-    "@media (max-width: 1200px)": {
+    // フレックス行の残り幅いっぱいに広がり、各列を等幅で満たす（無いと列が中身幅まで縮む）
+    flexGrow: 1,
+    minWidth: 0,
+    // 列数の切替閾値はカード実幅基準。実環境で調整するならこの値を動かす
+    "@container (max-width: 800px)": {
       gridTemplateColumns: "1fr",
     },
   },
   dropdown: {
     height: "36px",
+    // Fluent 既定の min-width:250px を解除し、グリッドのセル幅に追従させる。
+    // これがないと狭い列で Dropdown がはみ出して隣の列と重なる。
+    minWidth: 0,
+    width: "100%",
   },
   buildingTypeDropdown: {
     maxWidth: "250px",
@@ -110,32 +125,6 @@ export const FormDataset = ({
   const { data: dataSetColumns } = useFetchDatasetColumns({
     filename: value?.path,
   });
-  const [isUpdateColumns, setIsUpdateColumns] = useState(false);
-
-  useEffect(
-    // ファイルが選択されたらドロップダウンの値を更新する
-    function updateColumns() {
-      if (!isUpdateColumns) return;
-      if (!dataSetColumns || dataSetColumns.length === 0 || !value.columns)
-        return;
-
-      // 最初の要素をドロップダウンのdefault valueに設定する
-      const [firstItem] = dataSetColumns;
-      const columnEntries = Object.entries(value.columns);
-      const newColumns = Object.fromEntries(
-        columnEntries.map(([key]) => [key, firstItem]),
-      );
-
-      onChange({
-        ...value,
-        columns: newColumns,
-      });
-      setIsUpdateColumns(false);
-    },
-
-    [dataSetColumns, isUpdateColumns, onChange, value],
-  );
-
   const datasetInfo = lang.components.normalizationData[dataKey];
   const datasetLabel = datasetInfo.label;
 
@@ -187,7 +176,7 @@ export const FormDataset = ({
   ]);
 
   return (
-    <Card>
+    <Card className={styles.card}>
       <span>{datasetLabel}</span>
       <div className={styles.fieldContainer}>
         <div
@@ -361,7 +350,6 @@ export const FormDataset = ({
             path: data?.file_path,
             residential_values: [],
           });
-          setIsUpdateColumns(true);
         }}
       />
     </Card>
@@ -382,6 +370,8 @@ const selectedDataSetViewStyles = makeStyles({
     fontWeight: tokens.fontWeightBold,
     lineHeight: "28px",
     padding: `0 ${tokens.spacingHorizontalXXL}`,
+    // 狭幅で「デ／ー／タ…」と1文字ずつ折り返すのを防ぐ
+    whiteSpace: "nowrap",
   },
   root: {
     display: "flex",
