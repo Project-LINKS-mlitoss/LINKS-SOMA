@@ -186,6 +186,23 @@ a { color: var(--c-primary); }
   min-width: 320px;
   text-align: center;
 }
+.hero-cta .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.hero-cta .btn-primary .gh-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+.hero-cta .ext-mark {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-left: 4px;
+}
 .btn {
   display: inline-block;
   padding: 14px 28px;
@@ -247,7 +264,7 @@ a { color: var(--c-primary); }
   max-width: 760px;
 }
 
-/* Cards (Problem / Join) */
+/* Cards (Problem) */
 .cards {
   display: grid;
   gap: var(--space-4);
@@ -515,96 +532,9 @@ a { color: var(--c-primary); }
 .proof-insights ul { margin: 0; padding-left: 20px; }
 .proof-insights li { margin-bottom: var(--space-2); color: var(--c-text-muted); }
 
-/* Join */
-.join-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-/* 子要素の margin を一旦リセットし、縦リズムは gap で一元管理 */
-/* h3 は `.card h3` (specificity 0,1,1) と同点にするため要素セレクタで明示上書き */
-.join-card > * { margin: 0; }
-.join-card h3 { margin: 0; }
-.join-tier {
-  display: inline-block;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: var(--c-primary);
-  color: white;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  align-self: flex-start;
-}
-/* `.card p { margin: 0 }` (0,1,1) を上書きするため `.join-card` 経由で (0,2,0) に上げる */
-.join-card .join-quota {
-  /* h3 (実証区分名) と視覚的に同じ塊に見せるため、上余白だけ gap を相殺して半分にする */
-  margin-top: calc(-1 * var(--space-1));
-  font-weight: 700;
-  color: var(--c-accent);
-}
-.join-cooperation-label {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--c-text-muted);
-  letter-spacing: 0.04em;
-}
-.join-card ul {
-  padding-left: 20px;
-  color: var(--c-text-muted);
-  font-size: 14px;
-}
-.join-card li { margin-bottom: 6px; }
-.join-card li:last-child { margin-bottom: 0; }
-
-.schedule-title {
-  margin: var(--space-6) 0 var(--space-3);
-  font-size: 20px;
-}
-.schedule {
-  background: white;
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-.schedule-row {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-  border-bottom: 1px solid var(--c-border);
-}
-.schedule-row:last-child { border-bottom: 0; }
-.schedule-period {
-  font-weight: 700;
-  color: var(--c-primary);
-}
-.schedule-note { margin-top: var(--space-3); color: var(--c-text-muted); }
-
 /* Contact */
-.contact-main {
-  margin-top: var(--space-5);
-  padding: var(--space-6);
-  background: var(--c-bg-alt);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-md);
-}
-.contact-main-title {
-  margin: 0 0 var(--space-2);
-  font-size: 22px;
-  color: var(--c-primary-dark);
-}
-.contact-main-lead {
-  margin: 0 0 var(--space-4);
-  color: var(--c-text);
-}
 .contact-sub {
-  margin-top: var(--space-6);
-}
-.contact-sub-title {
-  margin: 0 0 var(--space-2);
-  font-size: 16px;
-  color: var(--c-text-muted);
+  margin-top: var(--space-4);
 }
 .contact-info {
   display: grid;
@@ -620,28 +550,6 @@ a { color: var(--c-primary); }
 }
 .contact-info dt { font-weight: 700; color: var(--c-primary-dark); }
 .contact-info dd { margin: 0; }
-.contact-cta-wrap {
-  margin: var(--space-3) 0 0;
-}
-.contact-cta-link {
-  display: inline-block;
-  background: var(--c-primary);
-  color: white;
-  padding: 8px 16px;
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
-}
-.contact-cta-link:hover {
-  background: var(--c-primary-dark);
-  color: white;
-}
-.contact-cta-note {
-  margin: var(--space-2) 0 0;
-  font-size: 12px;
-  color: var(--c-text-muted);
-}
 
 /* Footer */
 .site-footer {
@@ -659,7 +567,6 @@ a { color: var(--c-primary); }
   .site-nav { gap: var(--space-2); }
   .site-nav a:not(.nav-cta) { display: none; }
   .spec-list > div,
-  .schedule-row,
   .contact-info > div {
     grid-template-columns: 1fr;
     gap: 4px;
@@ -669,51 +576,6 @@ a { color: var(--c-primary); }
   .section-title { font-size: 24px; }
 }
 
-/* Hero tertiary CTA — GitHub への副導線 (Primary >> Secondary > Tertiary の3階層) */
-.hero-cta-tertiary-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 4px;
-}
-.hero-cta-tertiary {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--c-text-muted);
-  text-decoration: none;
-  border-bottom: 1px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.hero-cta-tertiary:hover {
-  color: var(--c-primary);
-  border-bottom-color: var(--c-soft);
-}
-.hero-cta-tertiary .gh-icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  fill: currentColor;
-}
-.hero-cta-tertiary .ext-mark {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-left: 2px;
-}
-.hero-cta-tertiary .cta-text {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.25;
-}
-.hero-cta-tertiary .cta-meta {
-  font-size: 11px;
-  opacity: 0.65;
-  margin-top: 1px;
-  font-weight: 400;
-}
 .aux-cta {
   margin-top: var(--space-5);
   padding: var(--space-4) var(--space-5);
